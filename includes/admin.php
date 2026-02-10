@@ -37,43 +37,8 @@ function tasa_daybook_admin_styles( $hook ) {
 add_action( 'admin_enqueue_scripts', 'tasa_daybook_admin_styles' );
 
 /* ─────────────────────────────────────────────
- * Enqueue admin scripts
+ * Enqueue admin scripts - removed, now inline with forms
  * ───────────────────────────────────────────── */
-function tasa_daybook_admin_scripts( $hook ) {
-    if ( 'tools_page_tasa-daybook' !== $hook ) {
-        return;
-    }
-    ?>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const inputs = document.querySelectorAll('[data-calc]');
-        const preview = document.getElementById('tdb-live-diff');
-        
-        if (!preview) return;
-        
-        function updatePreview() {
-            const opening = parseFloat(document.getElementById('opening_cash')?.value || 0);
-            const sales = parseFloat(document.getElementById('cash_sales')?.value || 0);
-            const takenOut = parseFloat(document.getElementById('cash_taken_out')?.value || 0);
-            const closing = parseFloat(document.getElementById('closing_cash')?.value || 0);
-            
-            const expected = opening + sales - takenOut;
-            const diff = closing - expected;
-            
-            preview.textContent = '$' + diff.toFixed(2);
-            preview.style.color = diff > 0 ? '#00a32a' : (diff < 0 ? '#d63638' : '#1a1a1a');
-        }
-        
-        inputs.forEach(input => {
-            input.addEventListener('input', updatePreview);
-        });
-        
-        updatePreview();
-    });
-    </script>
-    <?php
-}
-add_action( 'admin_footer', 'tasa_daybook_admin_scripts' );
 
 /* ─────────────────────────────────────────────
  * Router – handle POST actions then render
@@ -163,11 +128,20 @@ function tasa_daybook_process_add() {
         return;
     }
 
-    $opening_cash    = floatval( sanitize_text_field( wp_unslash( $_POST['opening_cash'] ?? '0' ) ) );
     $cash_sales      = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
-    $online_payments = floatval( sanitize_text_field( wp_unslash( $_POST['online_payments'] ?? '0' ) ) );
+    $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
-    $closing_cash    = floatval( sanitize_text_field( wp_unslash( $_POST['closing_cash'] ?? '0' ) ) );
+
+    // Get previous day's closing cash for opening cash
+    $previous_record = $wpdb->get_row( $wpdb->prepare(
+        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $today
+    ) );
+    $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
+
+    // Calculate closing cash: Today's Sale + Opening Cash - Cash Taken Out
+    // Where Today's Sale = Cash Sales + Online Sales
+    $todays_sale     = $cash_sales + $online_sales;
+    $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
 
     // Expected = opening + cash_sales - cash_taken_out
     $expected        = $opening_cash + $cash_sales - $cash_taken_out;
@@ -179,7 +153,7 @@ function tasa_daybook_process_add() {
             'record_date'     => $today,
             'opening_cash'    => $opening_cash,
             'cash_sales'      => $cash_sales,
-            'online_payments' => $online_payments,
+            'online_payments' => $online_sales,  // Note: DB column is still 'online_payments'
             'cash_taken_out'  => $cash_taken_out,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
@@ -211,11 +185,25 @@ function tasa_daybook_process_edit() {
         return;
     }
 
-    $opening_cash    = floatval( sanitize_text_field( wp_unslash( $_POST['opening_cash'] ?? '0' ) ) );
     $cash_sales      = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
-    $online_payments = floatval( sanitize_text_field( wp_unslash( $_POST['online_payments'] ?? '0' ) ) );
+    $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
-    $closing_cash    = floatval( sanitize_text_field( wp_unslash( $_POST['closing_cash'] ?? '0' ) ) );
+
+    // Get the record being edited to find its date
+    $record = $wpdb->get_row( $wpdb->prepare(
+        "SELECT record_date FROM {$table} WHERE id = %d", $id
+    ) );
+
+    // Get previous day's closing cash for opening cash
+    $previous_record = $wpdb->get_row( $wpdb->prepare(
+        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $record->record_date
+    ) );
+    $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
+
+    // Calculate closing cash: Today's Sale + Opening Cash - Cash Taken Out
+    // Where Today's Sale = Cash Sales + Online Sales
+    $todays_sale     = $cash_sales + $online_sales;
+    $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
 
     $expected        = $opening_cash + $cash_sales - $cash_taken_out;
     $calculated_diff = $closing_cash - $expected;
@@ -225,7 +213,7 @@ function tasa_daybook_process_edit() {
         array(
             'opening_cash'    => $opening_cash,
             'cash_sales'      => $cash_sales,
-            'online_payments' => $online_payments,
+            'online_payments' => $online_sales,  // Note: DB column is still 'online_payments'
             'cash_taken_out'  => $cash_taken_out,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
@@ -272,6 +260,12 @@ function tasa_daybook_render_add_form() {
         "SELECT COUNT(*) FROM {$table} WHERE record_date = %s", $today
     ) );
 
+    // Get previous day's closing cash for opening cash
+    $previous_record = $wpdb->get_row( $wpdb->prepare(
+        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $today
+    ) );
+    $opening_cash = $previous_record ? number_format( (float) $previous_record->closing_cash, 2 ) : '0.00';
+
     settings_errors( 'tasa_cc' );
 
     echo '<div class="tdb-card">';
@@ -299,50 +293,107 @@ function tasa_daybook_render_add_form() {
             <div class="tdb-field">
                 <label for="opening_cash"><span class="dashicons dashicons-vault"></span> <?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
-                    <span class="tdb-input-prefix">$</span>
-                    <input type="number" step="0.01" min="0" id="opening_cash" name="opening_cash" value="0.00" required class="tdb-input" data-calc>
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="text" id="opening_cash" name="opening_cash" value="<?php echo esc_attr( $opening_cash ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
             </div>
             <div class="tdb-field">
                 <label for="cash_sales"><span class="dashicons dashicons-money-alt"></span> <?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
-                    <span class="tdb-input-prefix">$</span>
-                    <input type="number" step="0.01" min="0" id="cash_sales" name="cash_sales" value="0.00" required class="tdb-input" data-calc>
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="number" step="0.01" min="0" id="cash_sales" name="cash_sales" placeholder="0.00" required class="tdb-input" data-calc>
                 </div>
             </div>
             <div class="tdb-field">
-                <label for="online_payments"><span class="dashicons dashicons-smartphone"></span> <?php esc_html_e( 'Online Payments', 'tasa-daybook' ); ?></label>
+                <label for="online_sales"><span class="dashicons dashicons-smartphone"></span> <?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
-                    <span class="tdb-input-prefix">$</span>
-                    <input type="number" step="0.01" min="0" id="online_payments" name="online_payments" value="0.00" required class="tdb-input">
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="number" step="0.01" min="0" id="online_sales" name="online_sales" placeholder="0.00" required class="tdb-input" data-calc>
+                </div>
+            </div>
+            <div class="tdb-field">
+                <label for="todays_sale"><span class="dashicons dashicons-chart-line"></span> <?php esc_html_e( 'Today\'s Sale', 'tasa-daybook' ); ?></label>
+                <div class="tdb-input-wrap">
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="text" id="todays_sale" name="todays_sale" value="0.00" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
             </div>
             <div class="tdb-field">
                 <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
-                    <span class="tdb-input-prefix">$</span>
-                    <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out" value="0.00" required class="tdb-input" data-calc>
-                </div>
-            </div>
-            <div class="tdb-field">
-                <label for="closing_cash"><span class="dashicons dashicons-lock"></span> <?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></label>
-                <div class="tdb-input-wrap">
-                    <span class="tdb-input-prefix">$</span>
-                    <input type="number" step="0.01" min="0" id="closing_cash" name="closing_cash" value="0.00" required class="tdb-input" data-calc>
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out" placeholder="0.00" required class="tdb-input" data-calc>
                 </div>
             </div>
         </div>
 
         <div class="tdb-preview">
-            <div class="tdb-preview__label"><?php esc_html_e( 'Live Difference Preview', 'tasa-daybook' ); ?></div>
-            <div class="tdb-preview__value" id="tdb-live-diff">$0.00</div>
-            <div class="tdb-preview__formula"><?php esc_html_e( 'Closing Cash − (Opening Cash + Cash Sales − Cash Taken Out)', 'tasa-daybook' ); ?></div>
+            <div class="tdb-preview__label"><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></div>
+            <div class="tdb-preview__value" id="tdb-closing-cash">₹<?php echo esc_html( $opening_cash ); ?></div>
+            <div class="tdb-preview__formula"><?php esc_html_e( 'Today\'s Sale + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></div>
         </div>
 
         <button type="submit" class="tdb-btn tdb-btn--primary">
             <span class="dashicons dashicons-saved"></span> <?php esc_html_e( 'Save Record', 'tasa-daybook' ); ?>
         </button>
     </form>
+
+    <script>
+    (function() {
+        'use strict';
+
+        var form = document.getElementById('tdb-add-form');
+        if (!form) return;
+
+        var openingCashField = document.getElementById('opening_cash');
+        var cashSalesField = document.getElementById('cash_sales');
+        var onlineSalesField = document.getElementById('online_sales');
+        var cashTakenOutField = document.getElementById('cash_taken_out');
+        var todaysSaleField = document.getElementById('todays_sale');
+        var closingCashPreview = document.getElementById('tdb-closing-cash');
+
+        if (!closingCashPreview || !todaysSaleField) return;
+
+        function updateCalculations() {
+            // Get values and handle empty/invalid inputs
+            var openingValue = openingCashField ? openingCashField.value.replace(/,/g, '') : '0';
+            var opening = parseFloat(openingValue) || 0;
+            var cashSales = parseFloat(cashSalesField ? cashSalesField.value : '0') || 0;
+            var onlineSales = parseFloat(onlineSalesField ? onlineSalesField.value : '0') || 0;
+            var takenOut = parseFloat(cashTakenOutField ? cashTakenOutField.value : '0') || 0;
+
+            // Calculate Today's Sale = Cash Sales + Online Sales
+            var todaysSale = cashSales + onlineSales;
+
+            // Calculate Closing Cash = Today's Sale + Opening Cash - Cash Taken Out
+            var closingCash = todaysSale + opening - takenOut;
+
+            // Update Today's Sale field
+            todaysSaleField.value = todaysSale.toFixed(2);
+
+            // Update Closing Cash preview
+            closingCashPreview.textContent = '₹' + closingCash.toFixed(2);
+            closingCashPreview.style.color = '#1a1a1a';
+        }
+
+        // Attach event listeners to input fields
+        if (cashSalesField) {
+            cashSalesField.addEventListener('input', updateCalculations);
+            cashSalesField.addEventListener('change', updateCalculations);
+        }
+        if (onlineSalesField) {
+            onlineSalesField.addEventListener('input', updateCalculations);
+            onlineSalesField.addEventListener('change', updateCalculations);
+        }
+        if (cashTakenOutField) {
+            cashTakenOutField.addEventListener('input', updateCalculations);
+            cashTakenOutField.addEventListener('change', updateCalculations);
+        }
+
+        // Initial calculation
+        updateCalculations();
+    })();
+    </script>
     <?php
     echo '</div>';
 }
@@ -365,6 +416,15 @@ function tasa_daybook_render_edit_form() {
         return;
     }
 
+    // Get previous day's closing cash for opening cash
+    $previous_record = $wpdb->get_row( $wpdb->prepare(
+        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $record->record_date
+    ) );
+    $opening_cash = $previous_record ? number_format( (float) $previous_record->closing_cash, 2 ) : '0.00';
+
+    // Calculate Today's Sale for display
+    $todays_sale = number_format( (float) $record->cash_sales + (float) $record->online_payments, 2 );
+
     $back_url = admin_url( 'tools.php?page=tasa-daybook' );
     ?>
     <div class="tdb-card">
@@ -381,49 +441,49 @@ function tasa_daybook_render_edit_form() {
                 <div class="tdb-field">
                     <label for="opening_cash"><span class="dashicons dashicons-vault"></span> <?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></label>
                     <div class="tdb-input-wrap">
-                        <span class="tdb-input-prefix">$</span>
-                        <input type="number" step="0.01" min="0" id="opening_cash" name="opening_cash"
-                               value="<?php echo esc_attr( $record->opening_cash ); ?>" required class="tdb-input" data-calc>
+                        <span class="tdb-input-prefix">₹</span>
+                        <input type="text" id="opening_cash" name="opening_cash"
+                               value="<?php echo esc_attr( $opening_cash ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                     </div>
                 </div>
                 <div class="tdb-field">
                     <label for="cash_sales"><span class="dashicons dashicons-money-alt"></span> <?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></label>
                     <div class="tdb-input-wrap">
-                        <span class="tdb-input-prefix">$</span>
+                        <span class="tdb-input-prefix">₹</span>
                         <input type="number" step="0.01" min="0" id="cash_sales" name="cash_sales"
                                value="<?php echo esc_attr( $record->cash_sales ); ?>" required class="tdb-input" data-calc>
                     </div>
                 </div>
                 <div class="tdb-field">
-                    <label for="online_payments"><span class="dashicons dashicons-smartphone"></span> <?php esc_html_e( 'Online Payments', 'tasa-daybook' ); ?></label>
+                    <label for="online_sales"><span class="dashicons dashicons-smartphone"></span> <?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></label>
                     <div class="tdb-input-wrap">
-                        <span class="tdb-input-prefix">$</span>
-                        <input type="number" step="0.01" min="0" id="online_payments" name="online_payments"
-                               value="<?php echo esc_attr( $record->online_payments ); ?>" required class="tdb-input">
+                        <span class="tdb-input-prefix">₹</span>
+                        <input type="number" step="0.01" min="0" id="online_sales" name="online_sales"
+                               value="<?php echo esc_attr( $record->online_payments ); ?>" required class="tdb-input" data-calc>
+                    </div>
+                </div>
+                <div class="tdb-field">
+                    <label for="todays_sale"><span class="dashicons dashicons-chart-line"></span> <?php esc_html_e( 'Today\'s Sale', 'tasa-daybook' ); ?></label>
+                    <div class="tdb-input-wrap">
+                        <span class="tdb-input-prefix">₹</span>
+                        <input type="text" id="todays_sale" name="todays_sale"
+                               value="<?php echo esc_attr( $todays_sale ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                     </div>
                 </div>
                 <div class="tdb-field">
                     <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></label>
                     <div class="tdb-input-wrap">
-                        <span class="tdb-input-prefix">$</span>
+                        <span class="tdb-input-prefix">₹</span>
                         <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out"
                                value="<?php echo esc_attr( $record->cash_taken_out ); ?>" required class="tdb-input" data-calc>
-                    </div>
-                </div>
-                <div class="tdb-field">
-                    <label for="closing_cash"><span class="dashicons dashicons-lock"></span> <?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></label>
-                    <div class="tdb-input-wrap">
-                        <span class="tdb-input-prefix">$</span>
-                        <input type="number" step="0.01" min="0" id="closing_cash" name="closing_cash"
-                               value="<?php echo esc_attr( $record->closing_cash ); ?>" required class="tdb-input" data-calc>
                     </div>
                 </div>
             </div>
 
             <div class="tdb-preview">
-                <div class="tdb-preview__label"><?php esc_html_e( 'Live Difference Preview', 'tasa-daybook' ); ?></div>
-                <div class="tdb-preview__value" id="tdb-live-diff">$<?php echo esc_html( number_format( (float) $record->calculated_diff, 2 ) ); ?></div>
-                <div class="tdb-preview__formula"><?php esc_html_e( 'Closing Cash − (Opening Cash + Cash Sales − Cash Taken Out)', 'tasa-daybook' ); ?></div>
+                <div class="tdb-preview__label"><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></div>
+                <div class="tdb-preview__value" id="tdb-closing-cash">₹<?php echo esc_html( number_format( (float) $record->closing_cash, 2 ) ); ?></div>
+                <div class="tdb-preview__formula"><?php esc_html_e( 'Today\'s Sale + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></div>
             </div>
 
             <div class="tdb-btn-group">
@@ -435,6 +495,63 @@ function tasa_daybook_render_edit_form() {
                 </a>
             </div>
         </form>
+
+        <script>
+        (function() {
+            'use strict';
+
+            var form = document.getElementById('tdb-edit-form');
+            if (!form) return;
+
+            var openingCashField = document.getElementById('opening_cash');
+            var cashSalesField = document.getElementById('cash_sales');
+            var onlineSalesField = document.getElementById('online_sales');
+            var cashTakenOutField = document.getElementById('cash_taken_out');
+            var todaysSaleField = document.getElementById('todays_sale');
+            var closingCashPreview = document.getElementById('tdb-closing-cash');
+
+            if (!closingCashPreview || !todaysSaleField) return;
+
+            function updateCalculations() {
+                // Get values and handle empty/invalid inputs
+                var openingValue = openingCashField ? openingCashField.value.replace(/,/g, '') : '0';
+                var opening = parseFloat(openingValue) || 0;
+                var cashSales = parseFloat(cashSalesField ? cashSalesField.value : '0') || 0;
+                var onlineSales = parseFloat(onlineSalesField ? onlineSalesField.value : '0') || 0;
+                var takenOut = parseFloat(cashTakenOutField ? cashTakenOutField.value : '0') || 0;
+
+                // Calculate Today's Sale = Cash Sales + Online Sales
+                var todaysSale = cashSales + onlineSales;
+
+                // Calculate Closing Cash = Today's Sale + Opening Cash - Cash Taken Out
+                var closingCash = todaysSale + opening - takenOut;
+
+                // Update Today's Sale field
+                todaysSaleField.value = todaysSale.toFixed(2);
+
+                // Update Closing Cash preview
+                closingCashPreview.textContent = '₹' + closingCash.toFixed(2);
+                closingCashPreview.style.color = '#1a1a1a';
+            }
+
+            // Attach event listeners to input fields
+            if (cashSalesField) {
+                cashSalesField.addEventListener('input', updateCalculations);
+                cashSalesField.addEventListener('change', updateCalculations);
+            }
+            if (onlineSalesField) {
+                onlineSalesField.addEventListener('input', updateCalculations);
+                onlineSalesField.addEventListener('change', updateCalculations);
+            }
+            if (cashTakenOutField) {
+                cashTakenOutField.addEventListener('input', updateCalculations);
+                cashTakenOutField.addEventListener('change', updateCalculations);
+            }
+
+            // Initial calculation
+            updateCalculations();
+        })();
+        </script>
     </div>
     <?php
 }
@@ -465,7 +582,7 @@ function tasa_daybook_render_records_table() {
                 <th><?php esc_html_e( 'Date', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></th>
-                <th><?php esc_html_e( 'Online Payments', 'tasa-daybook' ); ?></th>
+                <th><?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Difference', 'tasa-daybook' ); ?></th>

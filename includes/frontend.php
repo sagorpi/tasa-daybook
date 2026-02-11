@@ -32,6 +32,63 @@ function tasa_daybook_frontend_enqueue() {
 add_action( 'wp_enqueue_scripts', 'tasa_daybook_frontend_enqueue' );
 
 /* ─────────────────────────────────────────────
+ * Fullscreen shortcode helpers
+ * ───────────────────────────────────────────── */
+function tasa_daybook_is_truthy( $value ) {
+    if ( is_bool( $value ) ) {
+        return $value;
+    }
+
+    return in_array( strtolower( trim( (string) $value ) ), array( '1', 'true', 'yes', 'on' ), true );
+}
+
+function tasa_daybook_get_shortcode_matches( $content ) {
+    if ( ! is_string( $content ) || false === strpos( $content, 'tasa_daybook_add_form' ) ) {
+        return array();
+    }
+
+    preg_match_all( '/' . get_shortcode_regex( array( 'tasa_daybook_add_form' ) ) . '/', $content, $matches, PREG_SET_ORDER );
+    return is_array( $matches ) ? $matches : array();
+}
+
+function tasa_daybook_has_fullscreen_shortcode( $content ) {
+    $matches = tasa_daybook_get_shortcode_matches( $content );
+
+    if ( empty( $matches ) ) {
+        return false;
+    }
+
+    foreach ( $matches as $match ) {
+        $atts = shortcode_parse_atts( $match[3] ?? '' );
+
+        if ( isset( $atts['fullscreen'] ) && tasa_daybook_is_truthy( $atts['fullscreen'] ) ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function tasa_daybook_render_fullscreen_shortcodes( $content ) {
+    $matches = tasa_daybook_get_shortcode_matches( $content );
+    $output  = array();
+
+    if ( empty( $matches ) ) {
+        return '';
+    }
+
+    foreach ( $matches as $match ) {
+        $atts = shortcode_parse_atts( $match[3] ?? '' );
+
+        if ( isset( $atts['fullscreen'] ) && tasa_daybook_is_truthy( $atts['fullscreen'] ) ) {
+            $output[] = do_shortcode( $match[0] );
+        }
+    }
+
+    return implode( "\n", $output );
+}
+
+/* ─────────────────────────────────────────────
  * Process frontend form submission
  * ───────────────────────────────────────────── */
 function tasa_daybook_process_frontend_submission() {
@@ -121,6 +178,46 @@ function tasa_daybook_process_frontend_submission() {
 add_action( 'template_redirect', 'tasa_daybook_process_frontend_submission' );
 
 /* ─────────────────────────────────────────────
+ * Render shortcode in fullscreen mode (no theme shell)
+ * ───────────────────────────────────────────── */
+function tasa_daybook_maybe_render_fullscreen_page() {
+    if ( is_admin() || ! is_singular() ) {
+        return;
+    }
+
+    global $post;
+
+    if ( ! ( $post instanceof WP_Post ) || ! tasa_daybook_has_fullscreen_shortcode( $post->post_content ) ) {
+        return;
+    }
+
+    $content = tasa_daybook_render_fullscreen_shortcodes( $post->post_content );
+
+    if ( '' === trim( $content ) ) {
+        return;
+    }
+
+    ?><!doctype html>
+<html <?php language_attributes(); ?>>
+<head>
+    <meta charset="<?php bloginfo( 'charset' ); ?>">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?php wp_head(); ?>
+</head>
+<body <?php body_class( 'tdb-fullscreen-page' ); ?>>
+<?php wp_body_open(); ?>
+<main class="tdb-fullscreen-shell">
+    <?php echo $content; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+</main>
+<?php wp_footer(); ?>
+</body>
+</html>
+    <?php
+    exit;
+}
+add_action( 'template_redirect', 'tasa_daybook_maybe_render_fullscreen_page', 99 );
+
+/* ─────────────────────────────────────────────
  * Set frontend message in transient
  * ───────────────────────────────────────────── */
 function tasa_daybook_set_frontend_message( $type, $message ) {
@@ -149,9 +246,19 @@ function tasa_daybook_get_frontend_message() {
  * Shortcode: Display frontend add form
  * ───────────────────────────────────────────── */
 function tasa_daybook_frontend_form( $atts ) {
+    $atts = shortcode_atts(
+        array(
+            'fullscreen' => 'false',
+        ),
+        $atts,
+        'tasa_daybook_add_form'
+    );
+    $is_fullscreen = tasa_daybook_is_truthy( $atts['fullscreen'] );
+    $wrapper_class = $is_fullscreen ? 'tdb-frontend-wrap tdb-frontend-wrap--fullscreen' : 'tdb-frontend-wrap';
+
     // Check if user is logged in
     if ( ! is_user_logged_in() ) {
-        return tasa_daybook_render_login_message();
+        return tasa_daybook_render_login_message( $wrapper_class );
     }
 
     // Check if user is Shop Manager or Administrator
@@ -159,7 +266,7 @@ function tasa_daybook_frontend_form( $atts ) {
     $allowed_roles = array( 'shop_manager', 'administrator' );
 
     if ( ! array_intersect( $allowed_roles, $user->roles ) ) {
-        return tasa_daybook_render_access_denied_message();
+        return tasa_daybook_render_access_denied_message( $wrapper_class );
     }
 
     global $wpdb;
@@ -175,7 +282,7 @@ function tasa_daybook_frontend_form( $atts ) {
 
     ob_start();
     ?>
-    <div class="tdb-frontend-wrap">
+    <div class="<?php echo esc_attr( $wrapper_class ); ?>">
         <?php echo tasa_daybook_render_frontend_message(); ?>
 
         <?php if ( $already_submitted ) : ?>
@@ -197,10 +304,10 @@ function tasa_daybook_frontend_form( $atts ) {
 /* ─────────────────────────────────────────────
  * Render login message
  * ───────────────────────────────────────────── */
-function tasa_daybook_render_login_message() {
+function tasa_daybook_render_login_message( $wrapper_class = 'tdb-frontend-wrap' ) {
     ob_start();
     ?>
-    <div class="tdb-frontend-wrap">
+    <div class="<?php echo esc_attr( $wrapper_class ); ?>">
         <div class="tdb-alert tdb-alert--warning">
             <span class="dashicons dashicons-lock"></span>
             <div>
@@ -219,10 +326,10 @@ function tasa_daybook_render_login_message() {
 /* ─────────────────────────────────────────────
  * Render access denied message
  * ───────────────────────────────────────────── */
-function tasa_daybook_render_access_denied_message() {
+function tasa_daybook_render_access_denied_message( $wrapper_class = 'tdb-frontend-wrap' ) {
     ob_start();
     ?>
-    <div class="tdb-frontend-wrap">
+    <div class="<?php echo esc_attr( $wrapper_class ); ?>">
         <div class="tdb-alert tdb-alert--error">
             <span class="dashicons dashicons-warning"></span>
             <div>
@@ -443,4 +550,3 @@ function tasa_daybook_render_frontend_add_form() {
     <?php
     return ob_get_clean();
 }
-

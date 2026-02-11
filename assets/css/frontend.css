@@ -10,6 +10,37 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* Fullscreen shell */
+body.tdb-fullscreen-page {
+    margin: 0;
+    min-height: 100vh;
+    background: #f4f6fb;
+}
+
+.tdb-fullscreen-shell {
+    min-height: 100vh;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+body.tdb-fullscreen-page.admin-bar .tdb-fullscreen-shell {
+    min-height: calc(100vh - 32px);
+}
+
+.tdb-frontend-wrap--fullscreen {
+    width: 100%;
+    max-width: 860px;
+    margin: 0;
+    padding: 0;
+}
+
+body.tdb-fullscreen-page .tdb-card {
+    margin: 0;
+}
+
 /* Card */
 .tdb-card {
     background: #fff;
@@ -267,6 +298,15 @@
         padding: 10px;
     }
 
+    .tdb-fullscreen-shell {
+        align-items: flex-start;
+        padding: 14px;
+    }
+
+    body.tdb-fullscreen-page.admin-bar .tdb-fullscreen-shell {
+        min-height: calc(100vh - 46px);
+    }
+
     .tdb-card {
         padding: 20px;
         border-radius: 8px;
@@ -314,4 +354,3 @@
         font-size: 16px;
     }
 }
-

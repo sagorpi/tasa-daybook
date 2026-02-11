@@ -54,10 +54,18 @@ body.tdb-fullscreen-page .tdb-card {
 .tdb-card__header {
     display: flex;
     align-items: flex-start;
+    justify-content: space-between;
     gap: 16px;
     margin-bottom: 28px;
     padding-bottom: 20px;
     border-bottom: 2px solid #f0f0f0;
+}
+
+.tdb-card__header-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    min-width: 0;
 }
 
 .tdb-card__icon {
@@ -81,6 +89,19 @@ body.tdb-fullscreen-page .tdb-card {
     font-size: 14px;
     color: #666;
     font-weight: 500;
+}
+
+.tdb-card__brand {
+    margin-left: auto;
+    padding-top: 2px;
+}
+
+.tdb-card__brand-logo {
+    display: block;
+    width: auto;
+    max-width: 190px;
+    max-height: 64px;
+    object-fit: contain;
 }
 
 /* Alert */
@@ -145,6 +166,23 @@ body.tdb-fullscreen-page .tdb-card {
 
 .tdb-alert--success .dashicons {
     color: #28a745;
+}
+
+.tdb-alert--submitted {
+    align-items: center;
+}
+
+.tdb-alert__content {
+    min-width: 0;
+}
+
+.tdb-alert__logo {
+    margin-left: auto;
+    width: auto;
+    max-width: 140px;
+    max-height: 48px;
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 /* Form */
@@ -317,6 +355,20 @@ body.tdb-fullscreen-page .tdb-card {
         gap: 12px;
     }
 
+    .tdb-card__header-main {
+        width: 100%;
+    }
+
+    .tdb-card__brand {
+        align-self: flex-end;
+        margin-left: 0;
+    }
+
+    .tdb-card__brand-logo {
+        max-width: 150px;
+        max-height: 52px;
+    }
+
     .tdb-card__title {
         font-size: 20px;
     }
@@ -333,6 +385,12 @@ body.tdb-fullscreen-page .tdb-card {
     .tdb-alert {
         flex-direction: column;
         gap: 10px;
+    }
+
+    .tdb-alert__logo {
+        margin-left: 0;
+        max-width: 120px;
+        max-height: 42px;
     }
 }
 

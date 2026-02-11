@@ -286,12 +286,13 @@ function tasa_daybook_frontend_form( $atts ) {
         <?php echo tasa_daybook_render_frontend_message(); ?>
 
         <?php if ( $already_submitted ) : ?>
-            <div class="tdb-alert tdb-alert--success">
+            <div class="tdb-alert tdb-alert--success tdb-alert--submitted">
                 <span class="dashicons dashicons-yes-alt"></span>
-                <div>
+                <div class="tdb-alert__content">
                     <strong><?php esc_html_e( 'Already Submitted', 'tasa-daybook' ); ?></strong>
                     <p><?php esc_html_e( 'You have already submitted today\'s record. Thank you!', 'tasa-daybook' ); ?></p>
                 </div>
+                <img src="https://i.ibb.co/605d3y3Q/Tasa-Elegance-Logo.png" alt="<?php esc_attr_e( 'TASA Elegance Logo', 'tasa-daybook' ); ?>" class="tdb-alert__logo">
             </div>
         <?php else : ?>
             <?php echo tasa_daybook_render_frontend_add_form(); ?>
@@ -388,10 +389,15 @@ function tasa_daybook_render_frontend_add_form() {
     ?>
     <div class="tdb-card">
         <div class="tdb-card__header">
-            <span class="dashicons dashicons-book tdb-card__icon"></span>
-            <div>
-                <h2 class="tdb-card__title"><?php esc_html_e( 'Submit Today\'s Record', 'tasa-daybook' ); ?></h2>
-                <p class="tdb-card__subtitle"><?php echo esc_html( $day_name ); ?></p>
+            <div class="tdb-card__header-main">
+                <span class="dashicons dashicons-book tdb-card__icon"></span>
+                <div>
+                    <h2 class="tdb-card__title"><?php esc_html_e( 'Submit Today\'s Record', 'tasa-daybook' ); ?></h2>
+                    <p class="tdb-card__subtitle"><?php echo esc_html( $day_name ); ?></p>
+                </div>
+            </div>
+            <div class="tdb-card__brand">
+                <img src="https://i.ibb.co/605d3y3Q/Tasa-Elegance-Logo.png" alt="<?php esc_attr_e( 'TASA Elegance Logo', 'tasa-daybook' ); ?>" class="tdb-card__brand-logo">
             </div>
         </div>
 

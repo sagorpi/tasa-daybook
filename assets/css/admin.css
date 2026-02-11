@@ -293,6 +293,77 @@
     margin-top: 20px;
 }
 
+.tasa-cc-table-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.tasa-cc-table-header h2 {
+    margin: 0;
+}
+
+.tasa-cc-export-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+}
+
+.tasa-cc-export-toggle .dashicons {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+}
+
+.tasa-cc-export-form {
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.tasa-cc-export-form[hidden] {
+    display: none !important;
+}
+
+.tasa-cc-export-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+}
+
+.tasa-cc-export-field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.tasa-cc-export-field input[type="date"],
+.tasa-cc-export-field select {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 7px 9px;
+    font-size: 13px;
+    background: #fff;
+}
+
+.tasa-cc-export-help {
+    margin: 10px 0 0;
+    color: #6b7280;
+    font-size: 12px;
+}
+
+.tasa-cc-export-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
 .tasa-cc-table {
     width: 100%;
     border-collapse: collapse;
@@ -441,5 +512,9 @@ body.tasa-cc-modal-open {
     .tdb-btn {
         width: 100%;
         justify-content: center;
+    }
+
+    .tasa-cc-export-actions {
+        flex-direction: column;
     }
 }

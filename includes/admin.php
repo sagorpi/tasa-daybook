@@ -22,6 +22,7 @@ function tasa_daybook_admin_menu() {
     );
 }
 add_action( 'admin_menu', 'tasa_daybook_admin_menu' );
+add_action( 'admin_init', 'tasa_daybook_maybe_export_csv' );
 
 /* ─────────────────────────────────────────────
  * Enqueue admin styles + fonts
@@ -101,6 +102,234 @@ function tasa_daybook_render_page() {
     }
 
     echo '</div>';
+}
+
+/* ─────────────────────────────────────────────
+ * CSV export helpers
+ * ───────────────────────────────────────────── */
+function tasa_daybook_is_valid_filter_date( $date ) {
+    if ( ! is_string( $date ) || '' === $date ) {
+        return false;
+    }
+
+    if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) ) {
+        return false;
+    }
+
+    $timestamp = strtotime( $date );
+    return false !== $timestamp && date( 'Y-m-d', $timestamp ) === $date;
+}
+
+function tasa_daybook_get_record_user_info( $created_by ) {
+    if ( ! $created_by ) {
+        return __( 'System', 'tasa-daybook' );
+    }
+
+    $user = get_userdata( $created_by );
+    if ( ! $user ) {
+        return __( 'Unknown User', 'tasa-daybook' );
+    }
+
+    $display_name = $user->display_name;
+    $user_roles   = $user->roles;
+    $role_label   = '';
+
+    if ( in_array( 'administrator', $user_roles, true ) ) {
+        $role_label = __( 'Administrator', 'tasa-daybook' );
+    } elseif ( in_array( 'shop_manager', $user_roles, true ) ) {
+        $role_label = __( 'Shop Manager', 'tasa-daybook' );
+    }
+
+    if ( $role_label ) {
+        return $display_name . ' (' . $role_label . ')';
+    }
+
+    return $display_name;
+}
+
+function tasa_daybook_maybe_export_csv() {
+    $page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : '';
+    if ( 'tasa-daybook' !== $page ) {
+        return;
+    }
+
+    $action = isset( $_GET['tasa_cc_action'] ) ? sanitize_text_field( wp_unslash( $_GET['tasa_cc_action'] ) ) : '';
+
+    if ( 'export_csv' !== $action ) {
+        return;
+    }
+
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_die( esc_html__( 'You do not have permission to export CSV.', 'tasa-daybook' ) );
+    }
+
+    if ( ! isset( $_GET['_tasa_cc_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_tasa_cc_nonce'] ) ), 'tasa_cc_export_csv' ) ) {
+        wp_die( esc_html__( 'Security check failed.', 'tasa-daybook' ) );
+    }
+
+    global $wpdb;
+    $table = tasa_daybook_table();
+
+    $export_mode = sanitize_text_field( wp_unslash( $_GET['export_mode'] ?? '' ) );
+    if ( ! in_array( $export_mode, array( 'today', 'tomorrow', 'single', 'range' ), true ) ) {
+        $export_mode = 'today';
+    }
+
+    $single_date = sanitize_text_field( wp_unslash( $_GET['single_date'] ?? '' ) );
+    $start_date  = sanitize_text_field( wp_unslash( $_GET['start_date'] ?? '' ) );
+    $end_date    = sanitize_text_field( wp_unslash( $_GET['end_date'] ?? '' ) );
+
+    $where_parts = array();
+    $params      = array();
+
+    if ( 'today' === $export_mode ) {
+        $where_parts[] = 'record_date = %s';
+        $params[]      = current_time( 'Y-m-d' );
+    } elseif ( 'tomorrow' === $export_mode ) {
+        $tomorrow = wp_date( 'Y-m-d', current_time( 'timestamp' ) + DAY_IN_SECONDS );
+        $where_parts[] = 'record_date = %s';
+        $params[]      = $tomorrow;
+    } elseif ( 'single' === $export_mode ) {
+        if ( ! tasa_daybook_is_valid_filter_date( $single_date ) ) {
+            wp_die( esc_html__( 'Please choose a valid single date.', 'tasa-daybook' ) );
+        }
+
+        $where_parts[] = 'record_date = %s';
+        $params[]      = $single_date;
+    } else {
+        if ( '' === $start_date || '' === $end_date ) {
+            wp_die( esc_html__( 'Please choose both start and end date for date range.', 'tasa-daybook' ) );
+        }
+
+        if ( ! tasa_daybook_is_valid_filter_date( $start_date ) ) {
+            wp_die( esc_html__( 'Invalid start date format.', 'tasa-daybook' ) );
+        }
+
+        if ( ! tasa_daybook_is_valid_filter_date( $end_date ) ) {
+            wp_die( esc_html__( 'Invalid end date format.', 'tasa-daybook' ) );
+        }
+
+        if ( $start_date > $end_date ) {
+            $temp       = $start_date;
+            $start_date = $end_date;
+            $end_date   = $temp;
+        }
+
+        $where_parts[] = 'record_date BETWEEN %s AND %s';
+        $params[]      = $start_date;
+        $params[]      = $end_date;
+    }
+
+    $sql = "SELECT * FROM {$table}";
+    if ( ! empty( $where_parts ) ) {
+        $sql .= ' WHERE ' . implode( ' AND ', $where_parts );
+    }
+    $sql .= ' ORDER BY record_date DESC, id DESC';
+
+    $records = ! empty( $params ) ? $wpdb->get_results( $wpdb->prepare( $sql, $params ) ) : $wpdb->get_results( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+    $filename = 'tasa-daybook-' . current_time( 'Ymd-His' ) . '.csv';
+
+    // Ensure no buffered HTML leaks into CSV output.
+    while ( ob_get_level() > 0 ) {
+        ob_end_clean();
+    }
+
+    nocache_headers();
+    header( 'Content-Type: text/csv; charset=utf-8' );
+    header( 'Content-Disposition: attachment; filename=' . $filename );
+
+    $output = fopen( 'php://output', 'w' );
+
+    fputcsv(
+        $output,
+        array(
+            'Date (Time)',
+            'Submitted By',
+            'Opening Cash',
+            'Cash Sales',
+            'Online Sales',
+            'Cash Taken Out',
+            'Note',
+            'Closing Cash',
+        )
+    );
+
+    foreach ( $records as $row ) {
+        $record_time = '';
+        if ( ! empty( $row->created_at ) ) {
+            $timestamp = strtotime( (string) $row->created_at );
+            if ( false !== $timestamp ) {
+                $record_time = wp_date( 'H:i:s', $timestamp );
+            }
+        }
+
+        $date_with_time = (string) $row->record_date;
+        if ( '' !== $record_time ) {
+            $date_with_time .= ' (' . $record_time . ')';
+        }
+
+        fputcsv(
+            $output,
+            array(
+                $date_with_time,
+                tasa_daybook_get_record_user_info( (int) $row->created_by ),
+                number_format( (float) $row->opening_cash, 2, '.', '' ),
+                number_format( (float) $row->cash_sales, 2, '.', '' ),
+                number_format( (float) $row->online_payments, 2, '.', '' ),
+                number_format( (float) $row->cash_taken_out, 2, '.', '' ),
+                (string) ( $row->note ?? '' ),
+                number_format( (float) $row->closing_cash, 2, '.', '' ),
+            )
+        );
+    }
+
+    fclose( $output );
+    exit;
+}
+
+/* ─────────────────────────────────────────────
+ * Recalculate opening/closing cash chain
+ * ───────────────────────────────────────────── */
+function tasa_daybook_recalculate_cash_chain() {
+    global $wpdb;
+    $table = tasa_daybook_table();
+
+    $records = $wpdb->get_results(
+        "SELECT id, cash_sales, online_payments, cash_taken_out FROM {$table} ORDER BY id ASC"
+    );
+
+    if ( empty( $records ) ) {
+        return;
+    }
+
+    $previous_closing = 0.00;
+
+    foreach ( $records as $record ) {
+        $opening_cash   = (float) $previous_closing;
+        $cash_sales     = (float) $record->cash_sales;
+        $online_sales   = (float) $record->online_payments;
+        $cash_taken_out = (float) $record->cash_taken_out;
+
+        $todays_sale     = $cash_sales + $online_sales;
+        $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
+        $expected        = $opening_cash + $cash_sales - $cash_taken_out;
+        $calculated_diff = $closing_cash - $expected;
+
+        $wpdb->update(
+            $table,
+            array(
+                'opening_cash'    => $opening_cash,
+                'closing_cash'    => $closing_cash,
+                'calculated_diff' => $calculated_diff,
+            ),
+            array( 'id' => (int) $record->id ),
+            array( '%f', '%f', '%f' ),
+            array( '%d' )
+        );
+
+        $previous_closing = $closing_cash;
+    }
 }
 
 /* ─────────────────────────────────────────────
@@ -269,6 +498,9 @@ function tasa_daybook_process_edit() {
         array( '%d' )
     );
 
+    // Recalculate all later rows so balances stay consistent after edits.
+    tasa_daybook_recalculate_cash_chain();
+
     add_settings_error( 'tasa_cc', 'updated', __( 'Record updated successfully.', 'tasa-daybook' ), 'success' );
 
     // Redirect back to list
@@ -289,7 +521,13 @@ function tasa_daybook_process_delete() {
     $id    = absint( $_POST['record_id'] ?? 0 );
 
     if ( $id ) {
-        $wpdb->delete( $table, array( 'id' => $id ), array( '%d' ) );
+        $deleted = $wpdb->delete( $table, array( 'id' => $id ), array( '%d' ) );
+
+        if ( false !== $deleted && $deleted > 0 ) {
+            // Recalculate remaining rows after delete so future cash stays adjusted.
+            tasa_daybook_recalculate_cash_chain();
+        }
+
         add_settings_error( 'tasa_cc', 'deleted', __( 'Record deleted.', 'tasa-daybook' ), 'success' );
     }
 }
@@ -697,7 +935,12 @@ function tasa_daybook_render_records_table() {
     $is_admin = current_user_can( 'manage_options' );
 
     echo '<div class="tasa-cc-card">';
-    echo '<h2>' . esc_html__( 'All Records', 'tasa-daybook' ) . '</h2>';
+    echo '<div class="tasa-cc-table-header">';
+    echo '<h2 class="tasa-cc-table-title">' . esc_html__( 'All Records', 'tasa-daybook' ) . '</h2>';
+    if ( ! empty( $records ) ) {
+        echo '<button type="button" class="button button-primary tasa-cc-export-toggle" id="tasa-cc-export-toggle"><span class="dashicons dashicons-download"></span>' . esc_html__( 'Download CSV', 'tasa-daybook' ) . '</button>';
+    }
+    echo '</div>';
 
     if ( empty( $records ) ) {
         echo '<p>' . esc_html__( 'No records found yet.', 'tasa-daybook' ) . '</p>';
@@ -705,7 +948,48 @@ function tasa_daybook_render_records_table() {
         return;
     }
 
+    $filter_mode        = sanitize_text_field( wp_unslash( $_GET['export_mode'] ?? 'today' ) );
+    if ( ! in_array( $filter_mode, array( 'today', 'tomorrow', 'single', 'range' ), true ) ) {
+        $filter_mode = 'today';
+    }
+    $filter_single_date = sanitize_text_field( wp_unslash( $_GET['single_date'] ?? '' ) );
+    $filter_start_date  = sanitize_text_field( wp_unslash( $_GET['start_date'] ?? '' ) );
+    $filter_end_date    = sanitize_text_field( wp_unslash( $_GET['end_date'] ?? '' ) );
+
     ?>
+    <form method="get" class="tasa-cc-export-form" id="tasa-cc-export-form" hidden>
+        <input type="hidden" name="page" value="tasa-daybook">
+        <input type="hidden" name="tasa_cc_action" value="export_csv">
+        <?php wp_nonce_field( 'tasa_cc_export_csv', '_tasa_cc_nonce' ); ?>
+        <div class="tasa-cc-export-fields">
+            <div class="tasa-cc-export-field">
+                <label for="tasa-cc-export-mode"><?php esc_html_e( 'Export Type', 'tasa-daybook' ); ?></label>
+                <select id="tasa-cc-export-mode" name="export_mode">
+                    <option value="today" <?php selected( $filter_mode, 'today' ); ?>><?php esc_html_e( 'Today', 'tasa-daybook' ); ?></option>
+                    <option value="tomorrow" <?php selected( $filter_mode, 'tomorrow' ); ?>><?php esc_html_e( 'Tomorrow', 'tasa-daybook' ); ?></option>
+                    <option value="single" <?php selected( $filter_mode, 'single' ); ?>><?php esc_html_e( 'Single Date', 'tasa-daybook' ); ?></option>
+                    <option value="range" <?php selected( $filter_mode, 'range' ); ?>><?php esc_html_e( 'Date Range', 'tasa-daybook' ); ?></option>
+                </select>
+            </div>
+            <div class="tasa-cc-export-field" id="tasa-cc-single-wrap">
+                <label for="tasa-cc-single-date"><?php esc_html_e( 'Single Date', 'tasa-daybook' ); ?></label>
+                <input type="date" id="tasa-cc-single-date" name="single_date" value="<?php echo esc_attr( $filter_single_date ); ?>">
+            </div>
+            <div class="tasa-cc-export-field" id="tasa-cc-range-start-wrap">
+                <label for="tasa-cc-start-date"><?php esc_html_e( 'Start Date', 'tasa-daybook' ); ?></label>
+                <input type="date" id="tasa-cc-start-date" name="start_date" value="<?php echo esc_attr( $filter_start_date ); ?>">
+            </div>
+            <div class="tasa-cc-export-field" id="tasa-cc-range-end-wrap">
+                <label for="tasa-cc-end-date"><?php esc_html_e( 'End Date', 'tasa-daybook' ); ?></label>
+                <input type="date" id="tasa-cc-end-date" name="end_date" value="<?php echo esc_attr( $filter_end_date ); ?>">
+            </div>
+        </div>
+        <p class="tasa-cc-export-help"><?php esc_html_e( 'Select Today, Tomorrow, Single Date, or Date Range.', 'tasa-daybook' ); ?></p>
+        <div class="tasa-cc-export-actions">
+            <button type="submit" class="button button-primary button-small"><?php esc_html_e( 'Download', 'tasa-daybook' ); ?></button>
+            <button type="button" class="button button-secondary button-small" id="tasa-cc-export-cancel"><?php esc_html_e( 'Cancel', 'tasa-daybook' ); ?></button>
+        </div>
+    </form>
     <div class="tasa-cc-table-wrap">
     <table class="widefat striped tasa-cc-table">
         <thead>
@@ -725,31 +1009,7 @@ function tasa_daybook_render_records_table() {
         </thead>
         <tbody>
         <?php foreach ( $records as $row ) :
-            // Get user information
-            $user_info = '';
-            if ( $row->created_by ) {
-                $user = get_userdata( $row->created_by );
-                if ( $user ) {
-                    $display_name = $user->display_name;
-                    $user_roles = $user->roles;
-                    $role_label = '';
-
-                    if ( in_array( 'administrator', $user_roles, true ) ) {
-                        $role_label = __( 'Administrator', 'tasa-daybook' );
-                    } elseif ( in_array( 'shop_manager', $user_roles, true ) ) {
-                        $role_label = __( 'Shop Manager', 'tasa-daybook' );
-                    }
-
-                    $user_info = $display_name;
-                    if ( $role_label ) {
-                        $user_info .= ' (' . $role_label . ')';
-                    }
-                } else {
-                    $user_info = __( 'Unknown User', 'tasa-daybook' );
-                }
-            } else {
-                $user_info = __( 'System', 'tasa-daybook' );
-            }
+            $user_info = tasa_daybook_get_record_user_info( (int) $row->created_by );
 
             // Detect "Cash Out Only" records (where both cash_sales and online_payments are 0)
             $is_cash_out_only = ( floatval( $row->cash_sales ) === 0.0 && floatval( $row->online_payments ) === 0.0 && floatval( $row->cash_taken_out ) > 0.0 );
@@ -811,9 +1071,70 @@ function tasa_daybook_render_records_table() {
 
         var modal = document.getElementById('tasa-cc-note-modal');
         var content = document.getElementById('tasa-cc-note-modal-content');
+        var exportToggle = document.getElementById('tasa-cc-export-toggle');
+        var exportForm = document.getElementById('tasa-cc-export-form');
+        var exportCancel = document.getElementById('tasa-cc-export-cancel');
+        var exportModeField = document.getElementById('tasa-cc-export-mode');
+        var singleDateField = document.getElementById('tasa-cc-single-date');
+        var startDateField = document.getElementById('tasa-cc-start-date');
+        var endDateField = document.getElementById('tasa-cc-end-date');
+        var singleDateWrap = document.getElementById('tasa-cc-single-wrap');
+        var rangeStartWrap = document.getElementById('tasa-cc-range-start-wrap');
+        var rangeEndWrap = document.getElementById('tasa-cc-range-end-wrap');
 
         if (!modal || !content) {
             return;
+        }
+
+        if (exportToggle && exportForm) {
+            exportToggle.addEventListener('click', function() {
+                if (exportForm.hasAttribute('hidden')) {
+                    exportForm.removeAttribute('hidden');
+                } else {
+                    exportForm.setAttribute('hidden', 'hidden');
+                }
+            });
+        }
+
+        if (exportCancel && exportForm) {
+            exportCancel.addEventListener('click', function() {
+                exportForm.setAttribute('hidden', 'hidden');
+            });
+        }
+
+        function updateExportModeFields() {
+            if (!exportModeField || !singleDateField || !startDateField || !endDateField || !singleDateWrap || !rangeStartWrap || !rangeEndWrap) {
+                return;
+            }
+
+            var mode = exportModeField.value;
+            var isSingle = mode === 'single';
+            var isRange = mode === 'range';
+
+            singleDateWrap.style.display = isSingle ? '' : 'none';
+            rangeStartWrap.style.display = isRange ? '' : 'none';
+            rangeEndWrap.style.display = isRange ? '' : 'none';
+
+            singleDateField.disabled = !isSingle;
+            startDateField.disabled = !isRange;
+            endDateField.disabled = !isRange;
+            singleDateField.required = isSingle;
+            startDateField.required = isRange;
+            endDateField.required = isRange;
+
+            if (!isSingle) {
+                singleDateField.value = '';
+            }
+
+            if (!isRange) {
+                startDateField.value = '';
+                endDateField.value = '';
+            }
+        }
+
+        if (exportModeField) {
+            exportModeField.addEventListener('change', updateExportModeFields);
+            updateExportModeFields();
         }
 
         function closeModal() {

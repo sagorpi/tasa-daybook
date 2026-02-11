@@ -3,7 +3,7 @@
  * Plugin Name: TASA DayBook
  * Plugin URI:  https://example.com/tasa-daybook
  * Description: Track daily cash, online payments, and cash taken out before store closing.
- * Version:     1.0.0
+ * Version:     1.1.0
  * Author:      TASA
  * Author URI:  https://example.com
  * License:     GPL-2.0+
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'TASA_DAYBOOK_VERSION', '1.0.0' );
+define( 'TASA_DAYBOOK_VERSION', '1.1.0' );
 define( 'TASA_DAYBOOK_TABLE', 'tasa_daybook_records' );
 define( 'TASA_DAYBOOK_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TASA_DAYBOOK_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -48,15 +48,56 @@ function tasa_daybook_activate() {
         created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
-        UNIQUE KEY record_date (record_date)
+        KEY record_date (record_date)
     ) $charset;";
 
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta( $sql );
 
     update_option( 'tasa_daybook_db_version', TASA_DAYBOOK_VERSION );
+
+    // Upgrade: Remove UNIQUE constraint from record_date if it exists
+    tasa_daybook_upgrade_database();
 }
 register_activation_hook( __FILE__, 'tasa_daybook_activate' );
+
+/* ─────────────────────────────────────────────
+ * Database Upgrade – Remove UNIQUE constraint from record_date
+ * ───────────────────────────────────────────── */
+function tasa_daybook_upgrade_database() {
+    global $wpdb;
+    $table = $wpdb->prefix . TASA_DAYBOOK_TABLE;
+
+    // Check if the UNIQUE constraint exists
+    $indexes = $wpdb->get_results( "SHOW INDEX FROM {$table} WHERE Key_name = 'record_date'" );
+
+    if ( ! empty( $indexes ) ) {
+        foreach ( $indexes as $index ) {
+            // If it's a UNIQUE index, drop it and recreate as a regular index
+            if ( $index->Non_unique == 0 ) {
+                // Drop the UNIQUE constraint
+                $wpdb->query( "ALTER TABLE {$table} DROP INDEX record_date" );
+
+                // Add it back as a regular index (non-unique)
+                $wpdb->query( "ALTER TABLE {$table} ADD INDEX record_date (record_date)" );
+
+                break;
+            }
+        }
+    }
+}
+
+/* ─────────────────────────────────────────────
+ * Check for database upgrades on admin init
+ * ───────────────────────────────────────────── */
+function tasa_daybook_check_upgrade() {
+    $current_version = get_option( 'tasa_daybook_db_version', '0' );
+
+    if ( version_compare( $current_version, TASA_DAYBOOK_VERSION, '<' ) ) {
+        tasa_daybook_activate(); // Run activation to update schema
+    }
+}
+add_action( 'admin_init', 'tasa_daybook_check_upgrade' );
 
 /* ─────────────────────────────────────────────
  * Include admin functionality

@@ -50,17 +50,28 @@ function tasa_daybook_process_frontend_submission() {
         return;
     }
 
+    // Check if user is Shop Manager or Administrator
+    $user = wp_get_current_user();
+    $allowed_roles = array( 'shop_manager', 'administrator' );
+
+    if ( ! array_intersect( $allowed_roles, $user->roles ) ) {
+        tasa_daybook_set_frontend_message( 'error', __( 'You do not have permission to submit records. This action is restricted to approved users.', 'tasa-daybook' ) );
+        return;
+    }
+
     global $wpdb;
     $table = tasa_daybook_table();
     $today = current_time( 'Y-m-d' );
 
-    // Check if a record already exists for today
-    $exists = $wpdb->get_var( $wpdb->prepare(
-        "SELECT COUNT(*) FROM {$table} WHERE record_date = %s", $today
+    // Check if the current user already submitted a record for today
+    $user_exists = $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$table} WHERE record_date = %s AND created_by = %d",
+        $today,
+        get_current_user_id()
     ) );
 
-    if ( $exists ) {
-        tasa_daybook_set_frontend_message( 'error', __( 'A record for today already exists. You can only submit one record per day.', 'tasa-daybook' ) );
+    if ( $user_exists ) {
+        tasa_daybook_set_frontend_message( 'error', __( 'You have already submitted a record for today. You can only submit one record per day.', 'tasa-daybook' ) );
         return;
     }
 
@@ -69,9 +80,10 @@ function tasa_daybook_process_frontend_submission() {
     $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
 
-    // Get previous day's closing cash for opening cash
+    // Get most recent record's closing cash for opening cash
+    // This includes records from the same day (for multiple admin entries) and previous days
     $previous_record = $wpdb->get_row( $wpdb->prepare(
-        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $today
+        "SELECT closing_cash FROM {$table} WHERE record_date <= %s ORDER BY id DESC LIMIT 1", $today
     ) );
     $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
 
@@ -142,20 +154,30 @@ function tasa_daybook_frontend_form( $atts ) {
         return tasa_daybook_render_login_message();
     }
 
+    // Check if user is Shop Manager or Administrator
+    $user = wp_get_current_user();
+    $allowed_roles = array( 'shop_manager', 'administrator' );
+
+    if ( ! array_intersect( $allowed_roles, $user->roles ) ) {
+        return tasa_daybook_render_access_denied_message();
+    }
+
     global $wpdb;
     $table = tasa_daybook_table();
     $today = current_time( 'Y-m-d' );
 
-    // Check if already submitted today
+    // Check if current user already submitted a record today
     $already_submitted = (bool) $wpdb->get_var( $wpdb->prepare(
-        "SELECT COUNT(*) FROM {$table} WHERE record_date = %s", $today
+        "SELECT COUNT(*) FROM {$table} WHERE record_date = %s AND created_by = %d",
+        $today,
+        get_current_user_id()
     ) );
 
     ob_start();
     ?>
     <div class="tdb-frontend-wrap">
         <?php echo tasa_daybook_render_frontend_message(); ?>
-        
+
         <?php if ( $already_submitted ) : ?>
             <div class="tdb-alert tdb-alert--success">
                 <span class="dashicons dashicons-yes-alt"></span>
@@ -187,6 +209,25 @@ function tasa_daybook_render_login_message() {
                 <p><a href="<?php echo esc_url( wp_login_url( get_permalink() ) ); ?>" class="tdb-btn tdb-btn--primary">
                     <?php esc_html_e( 'Log In', 'tasa-daybook' ); ?>
                 </a></p>
+            </div>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/* ─────────────────────────────────────────────
+ * Render access denied message
+ * ───────────────────────────────────────────── */
+function tasa_daybook_render_access_denied_message() {
+    ob_start();
+    ?>
+    <div class="tdb-frontend-wrap">
+        <div class="tdb-alert tdb-alert--error">
+            <span class="dashicons dashicons-warning"></span>
+            <div>
+                <strong><?php esc_html_e( 'Access Denied', 'tasa-daybook' ); ?></strong>
+                <p><?php esc_html_e( 'You do not have permission to access this page. Only Shop Managers and Administrators can submit records.', 'tasa-daybook' ); ?></p>
             </div>
         </div>
     </div>
@@ -229,9 +270,10 @@ function tasa_daybook_render_frontend_add_form() {
     $day_name = wp_date( 'l, F j, Y' );
     $current_user = wp_get_current_user();
 
-    // Get previous day's closing cash for opening cash
+    // Get most recent record's closing cash for opening cash
+    // This includes records from the same day (for multiple admin entries) and previous days
     $previous_record = $wpdb->get_row( $wpdb->prepare(
-        "SELECT closing_cash FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1", $today
+        "SELECT closing_cash FROM {$table} WHERE record_date <= %s ORDER BY id DESC LIMIT 1", $today
     ) );
     $opening_cash = $previous_record ? number_format( (float) $previous_record->closing_cash, 2 ) : '0.00';
 

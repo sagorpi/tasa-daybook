@@ -154,6 +154,7 @@
 .tdb-input-prefix {
     position: absolute;
     left: 16px;
+    top: 14px;
     font-weight: 600;
     font-size: 16px;
     color: #666;
@@ -162,7 +163,7 @@
 
 .tdb-input {
     width: 100%;
-    padding: 12px 16px 12px 37px;
+    padding: 12px 16px 12px 30px !important;
     border: 2px solid #e0e0e0;
     border-radius: 8px;
     font-size: 16px;

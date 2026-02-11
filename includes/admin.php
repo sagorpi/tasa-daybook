@@ -716,9 +716,8 @@ function tasa_daybook_render_records_table() {
                 <th><?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></th>
-                <th><?php esc_html_e( 'Note', 'tasa-daybook' ); ?></th>
+                <th class="tasa-cc-note-col"><?php esc_html_e( 'Note', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></th>
-                <th><?php esc_html_e( 'Difference', 'tasa-daybook' ); ?></th>
                 <?php if ( $is_admin ) : ?>
                     <th><?php esc_html_e( 'Actions', 'tasa-daybook' ); ?></th>
                 <?php endif; ?>
@@ -726,13 +725,6 @@ function tasa_daybook_render_records_table() {
         </thead>
         <tbody>
         <?php foreach ( $records as $row ) :
-            $diff_class = '';
-            if ( floatval( $row->calculated_diff ) > 0 ) {
-                $diff_class = 'tasa-cc-positive';
-            } elseif ( floatval( $row->calculated_diff ) < 0 ) {
-                $diff_class = 'tasa-cc-negative';
-            }
-
             // Get user information
             $user_info = '';
             if ( $row->created_by ) {
@@ -776,11 +768,16 @@ function tasa_daybook_render_records_table() {
                 <td><?php echo esc_html( number_format( (float) $row->cash_sales, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->online_payments, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->cash_taken_out, 2 ) ); ?></td>
-                <td class="tasa-cc-note"><?php echo '' !== trim( (string) ( $row->note ?? '' ) ) ? esc_html( $row->note ) : '-'; ?></td>
-                <td><?php echo esc_html( number_format( (float) $row->closing_cash, 2 ) ); ?></td>
-                <td class="<?php echo esc_attr( $diff_class ); ?>">
-                    <?php echo esc_html( number_format( (float) $row->calculated_diff, 2 ) ); ?>
+                <td class="tasa-cc-note">
+                    <?php if ( '' !== trim( (string) ( $row->note ?? '' ) ) ) : ?>
+                        <button type="button" class="button button-small tasa-cc-view-note" data-note="<?php echo esc_attr( $row->note ); ?>">
+                            <?php esc_html_e( 'View', 'tasa-daybook' ); ?>
+                        </button>
+                    <?php else : ?>
+                        -
+                    <?php endif; ?>
                 </td>
+                <td><?php echo esc_html( number_format( (float) $row->closing_cash, 2 ) ); ?></td>
                 <?php if ( $is_admin ) : ?>
                 <td class="tasa-cc-actions">
                     <a href="<?php echo esc_url( admin_url( 'tools.php?page=tasa-daybook&cc_action=edit&record_id=' . $row->id ) ); ?>"
@@ -799,6 +796,58 @@ function tasa_daybook_render_records_table() {
         </tbody>
     </table>
     </div>
+    <div id="tasa-cc-note-modal" class="tasa-cc-note-modal" hidden>
+        <div class="tasa-cc-note-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="tasa-cc-note-modal-title">
+            <div class="tasa-cc-note-modal__header">
+                <h3 id="tasa-cc-note-modal-title"><?php esc_html_e( 'Note', 'tasa-daybook' ); ?></h3>
+                <button type="button" class="tasa-cc-note-modal__close" data-note-close aria-label="<?php esc_attr_e( 'Close', 'tasa-daybook' ); ?>">&times;</button>
+            </div>
+            <div class="tasa-cc-note-modal__content" id="tasa-cc-note-modal-content"></div>
+        </div>
+    </div>
+    <script>
+    (function() {
+        'use strict';
+
+        var modal = document.getElementById('tasa-cc-note-modal');
+        var content = document.getElementById('tasa-cc-note-modal-content');
+
+        if (!modal || !content) {
+            return;
+        }
+
+        function closeModal() {
+            modal.setAttribute('hidden', 'hidden');
+            document.body.classList.remove('tasa-cc-modal-open');
+            content.textContent = '';
+        }
+
+        function openModal(noteText) {
+            content.textContent = noteText || '';
+            modal.removeAttribute('hidden');
+            document.body.classList.add('tasa-cc-modal-open');
+        }
+
+        document.addEventListener('click', function(event) {
+            var button = event.target.closest('.tasa-cc-view-note');
+            if (button) {
+                event.preventDefault();
+                openModal(button.getAttribute('data-note') || '');
+                return;
+            }
+
+            if (event.target.matches('[data-note-close]') || event.target === modal) {
+                closeModal();
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape' && !modal.hasAttribute('hidden')) {
+                closeModal();
+            }
+        });
+    })();
+    </script>
     <?php
     echo '</div>';
 }

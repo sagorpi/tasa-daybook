@@ -3,7 +3,7 @@
  * Plugin Name: TASA DayBook
  * Plugin URI:  https://example.com/tasa-daybook
  * Description: Track daily cash, online payments, and cash taken out before store closing.
- * Version:     1.1.0
+ * Version:     1.2.0
  * Author:      TASA
  * Author URI:  https://example.com
  * License:     GPL-2.0+
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'TASA_DAYBOOK_VERSION', '1.1.0' );
+define( 'TASA_DAYBOOK_VERSION', '1.2.0' );
 define( 'TASA_DAYBOOK_TABLE', 'tasa_daybook_records' );
 define( 'TASA_DAYBOOK_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TASA_DAYBOOK_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -44,6 +44,7 @@ function tasa_daybook_activate() {
         cash_taken_out   DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         closing_cash     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         calculated_diff  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        note             TEXT          NULL,
         created_by       BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -84,6 +85,16 @@ function tasa_daybook_upgrade_database() {
                 break;
             }
         }
+    }
+
+    // Add note column for record comments if missing.
+    $note_column = $wpdb->get_var( $wpdb->prepare(
+        "SHOW COLUMNS FROM {$table} LIKE %s",
+        'note'
+    ) );
+
+    if ( ! $note_column ) {
+        $wpdb->query( "ALTER TABLE {$table} ADD COLUMN note TEXT NULL AFTER calculated_diff" );
     }
 }
 

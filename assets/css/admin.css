@@ -148,6 +148,10 @@
     margin-bottom: 24px;
 }
 
+.tdb-field--full {
+    grid-column: 1 / -1;
+}
+
 .tdb-field label {
     display: flex;
     align-items: center;
@@ -192,6 +196,13 @@
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.tdb-input--textarea {
+    padding: 10px 14px !important;
+    min-height: 90px;
+    resize: vertical;
+    line-height: 1.5;
 }
 
 /* Preview */
@@ -327,6 +338,12 @@
     margin: 0 4px;
 }
 
+.tasa-cc-note {
+    white-space: normal !important;
+    text-align: left !important;
+    min-width: 220px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .tdb-header {
@@ -348,4 +365,3 @@
         justify-content: center;
     }
 }
-

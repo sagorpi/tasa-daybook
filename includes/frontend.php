@@ -136,6 +136,7 @@ function tasa_daybook_process_frontend_submission() {
     $cash_sales      = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
     $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
+    $note            = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
 
     // Get most recent record's closing cash for opening cash
     // This includes records from the same day (for multiple admin entries) and previous days
@@ -164,9 +165,10 @@ function tasa_daybook_process_frontend_submission() {
             'cash_taken_out'  => $cash_taken_out,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
+            'note'            => $note,
             'created_by'      => get_current_user_id(),
         ),
-        array( '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%d' )
+        array( '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%s', '%d' )
     );
 
     if ( false !== $result ) {
@@ -377,6 +379,11 @@ function tasa_daybook_render_frontend_add_form() {
     $today = current_time( 'Y-m-d' );
     $day_name = wp_date( 'l, F j, Y' );
     $current_user = wp_get_current_user();
+    $user_full_name = trim( $current_user->first_name . ' ' . $current_user->last_name );
+
+    if ( '' === $user_full_name ) {
+        $user_full_name = $current_user->display_name;
+    }
 
     // Get most recent record's closing cash for opening cash
     // This includes records from the same day (for multiple admin entries) and previous days
@@ -394,6 +401,7 @@ function tasa_daybook_render_frontend_add_form() {
                 <div>
                     <h2 class="tdb-card__title"><?php esc_html_e( 'Submit Today\'s Record', 'tasa-daybook' ); ?></h2>
                     <p class="tdb-card__subtitle"><?php echo esc_html( $day_name ); ?></p>
+                    <p class="tdb-card__user"><?php echo esc_html( $user_full_name ); ?></p>
                 </div>
             </div>
             <div class="tdb-card__brand">
@@ -464,6 +472,14 @@ function tasa_daybook_render_frontend_add_form() {
                         <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out"
                                placeholder="0.00" required class="tdb-input" data-calc>
                     </div>
+                </div>
+
+                <div class="tdb-field tdb-field--full">
+                    <label for="note">
+                        <span class="dashicons dashicons-edit"></span>
+                        <?php esc_html_e( 'Note', 'tasa-daybook' ); ?>
+                    </label>
+                    <textarea id="note" name="note" rows="3" class="tdb-input tdb-input--textarea" placeholder="<?php esc_attr_e( 'Add any note for this submission (optional)', 'tasa-daybook' ); ?>"></textarea>
                 </div>
             </div>
 

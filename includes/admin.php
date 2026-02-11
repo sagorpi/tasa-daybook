@@ -171,6 +171,7 @@ function tasa_daybook_process_add() {
     }
 
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
+    $note            = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
 
     // Get most recent record's closing cash for opening cash
     // This includes records from the same day (for multiple admin entries) and previous days
@@ -198,9 +199,10 @@ function tasa_daybook_process_add() {
             'cash_taken_out'  => $cash_taken_out,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
+            'note'            => $note,
             'created_by'      => get_current_user_id(),
         ),
-        array( '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%d' )
+        array( '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%s', '%d' )
     );
 
     if ( false !== $result ) {
@@ -229,6 +231,7 @@ function tasa_daybook_process_edit() {
     $cash_sales      = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
     $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
+    $note            = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
 
     // Get the record being edited to find its date
     $record = $wpdb->get_row( $wpdb->prepare(
@@ -259,9 +262,10 @@ function tasa_daybook_process_edit() {
             'cash_taken_out'  => $cash_taken_out,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
+            'note'            => $note,
         ),
         array( 'id' => $id ),
-        array( '%f', '%f', '%f', '%f', '%f', '%f' ),
+        array( '%f', '%f', '%f', '%f', '%f', '%f', '%s' ),
         array( '%d' )
     );
 
@@ -384,6 +388,10 @@ function tasa_daybook_render_add_form() {
                     <span class="tdb-input-prefix">₹</span>
                     <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out" placeholder="0.00" required class="tdb-input" data-calc>
                 </div>
+            </div>
+            <div class="tdb-field tdb-field--full">
+                <label for="note"><span class="dashicons dashicons-edit"></span> <?php esc_html_e( 'Note', 'tasa-daybook' ); ?></label>
+                <textarea id="note" name="note" rows="3" class="tdb-input tdb-input--textarea" placeholder="<?php esc_attr_e( 'Add a note for this record (optional)', 'tasa-daybook' ); ?>"></textarea>
             </div>
         </div>
 
@@ -597,6 +605,10 @@ function tasa_daybook_render_edit_form() {
                                value="<?php echo esc_attr( $record->cash_taken_out ); ?>" required class="tdb-input" data-calc>
                     </div>
                 </div>
+                <div class="tdb-field tdb-field--full">
+                    <label for="note"><span class="dashicons dashicons-edit"></span> <?php esc_html_e( 'Note', 'tasa-daybook' ); ?></label>
+                    <textarea id="note" name="note" rows="3" class="tdb-input tdb-input--textarea" placeholder="<?php esc_attr_e( 'Add a note for this record (optional)', 'tasa-daybook' ); ?>"><?php echo esc_textarea( $record->note ?? '' ); ?></textarea>
+                </div>
             </div>
 
             <div class="tdb-preview">
@@ -704,6 +716,7 @@ function tasa_daybook_render_records_table() {
                 <th><?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></th>
+                <th><?php esc_html_e( 'Note', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Difference', 'tasa-daybook' ); ?></th>
                 <?php if ( $is_admin ) : ?>
@@ -763,6 +776,7 @@ function tasa_daybook_render_records_table() {
                 <td><?php echo esc_html( number_format( (float) $row->cash_sales, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->online_payments, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->cash_taken_out, 2 ) ); ?></td>
+                <td class="tasa-cc-note"><?php echo '' !== trim( (string) ( $row->note ?? '' ) ) ? esc_html( $row->note ) : '-'; ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->closing_cash, 2 ) ); ?></td>
                 <td class="<?php echo esc_attr( $diff_class ); ?>">
                     <?php echo esc_html( number_format( (float) $row->calculated_diff, 2 ) ); ?>
@@ -788,4 +802,3 @@ function tasa_daybook_render_records_table() {
     <?php
     echo '</div>';
 }
-

@@ -91,6 +91,13 @@ body.tdb-fullscreen-page .tdb-card {
     font-weight: 500;
 }
 
+.tdb-card__user {
+    margin: 6px 0 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d4ed8;
+}
+
 .tdb-card__brand {
     margin-left: auto;
     padding-top: 2px;
@@ -197,6 +204,10 @@ body.tdb-fullscreen-page .tdb-card {
     margin-bottom: 28px;
 }
 
+.tdb-field--full {
+    grid-column: 1 / -1;
+}
+
 .tdb-field label {
     display: flex;
     align-items: center;
@@ -249,6 +260,13 @@ body.tdb-fullscreen-page .tdb-card {
 
 .tdb-input:hover {
     border-color: #b8b8b8;
+}
+
+.tdb-input--textarea {
+    padding: 12px 14px !important;
+    min-height: 96px;
+    resize: vertical;
+    line-height: 1.5;
 }
 
 /* Preview */

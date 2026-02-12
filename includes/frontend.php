@@ -311,15 +311,16 @@ function tasa_daybook_render_login_message( $wrapper_class = 'tdb-frontend-wrap'
     ob_start();
     ?>
     <div class="<?php echo esc_attr( $wrapper_class ); ?>">
-        <div class="tdb-alert tdb-alert--warning">
+        <div class="tdb-alert tdb-alert--warning tdb-alert--with-logo">
             <span class="dashicons dashicons-lock"></span>
-            <div>
+            <div class="tdb-alert__content">
                 <strong><?php esc_html_e( 'Login Required', 'tasa-daybook' ); ?></strong>
                 <p><?php esc_html_e( 'You must be logged in to submit a record.', 'tasa-daybook' ); ?></p>
                 <p><a href="<?php echo esc_url( wp_login_url( get_permalink() ) ); ?>" class="tdb-btn tdb-btn--primary">
                     <?php esc_html_e( 'Log In', 'tasa-daybook' ); ?>
                 </a></p>
             </div>
+            <img src="https://i.ibb.co/605d3y3Q/Tasa-Elegance-Logo.png" alt="<?php esc_attr_e( 'TASA Elegance Logo', 'tasa-daybook' ); ?>" class="tdb-alert__logo">
         </div>
     </div>
     <?php

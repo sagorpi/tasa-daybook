@@ -179,6 +179,10 @@ body.tdb-fullscreen-page .tdb-card {
     align-items: center;
 }
 
+.tdb-alert--with-logo {
+    align-items: center;
+}
+
 .tdb-alert__content {
     min-width: 0;
 }

@@ -296,7 +296,7 @@ function tasa_daybook_recalculate_cash_chain() {
     $table = tasa_daybook_table();
 
     $records = $wpdb->get_results(
-        "SELECT id, cash_sales, online_payments, cash_taken_out FROM {$table} ORDER BY id ASC"
+        "SELECT id, cash_sales, cash_taken_out, withdrawal_type FROM {$table} ORDER BY id ASC"
     );
 
     if ( empty( $records ) ) {
@@ -308,12 +308,14 @@ function tasa_daybook_recalculate_cash_chain() {
     foreach ( $records as $record ) {
         $opening_cash   = (float) $previous_closing;
         $cash_sales     = (float) $record->cash_sales;
-        $online_sales   = (float) $record->online_payments;
         $cash_taken_out = (float) $record->cash_taken_out;
+        $withdrawal_type = isset( $record->withdrawal_type ) && in_array( $record->withdrawal_type, array( 'cash', 'online' ), true )
+            ? $record->withdrawal_type
+            : 'cash';
+        $effective_cash_taken_out = $withdrawal_type === 'cash' ? $cash_taken_out : 0.00;
 
-        $todays_sale     = $cash_sales + $online_sales;
-        $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
-        $expected        = $opening_cash + $cash_sales - $cash_taken_out;
+        $closing_cash    = $cash_sales + $opening_cash - $effective_cash_taken_out;
+        $expected        = $opening_cash + $cash_sales - $effective_cash_taken_out;
         $calculated_diff = $closing_cash - $expected;
 
         $wpdb->update(
@@ -330,6 +332,57 @@ function tasa_daybook_recalculate_cash_chain() {
 
         $previous_closing = $closing_cash;
     }
+}
+
+/**
+ * Get online-sales total for the latest day before the given date.
+ *
+ * @param string $reference_date Date in Y-m-d format.
+ * @return float
+ */
+function tasa_daybook_get_previous_day_online_total( $reference_date ) {
+    global $wpdb;
+    $table = tasa_daybook_table();
+
+    $previous_date = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT record_date FROM {$table} WHERE record_date < %s ORDER BY record_date DESC LIMIT 1",
+            $reference_date
+        )
+    );
+
+    if ( empty( $previous_date ) ) {
+        return 0.00;
+    }
+
+    $online_total = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT SUM(online_payments) FROM {$table} WHERE record_date = %s",
+            $previous_date
+        )
+    );
+
+    return null !== $online_total ? (float) $online_total : 0.00;
+}
+
+/**
+ * Get net online balance up to and including the given date.
+ *
+ * @param string $reference_date Date in Y-m-d format.
+ * @return float
+ */
+function tasa_daybook_get_online_balance_upto_date( $reference_date ) {
+    global $wpdb;
+    $table = tasa_daybook_table();
+
+    $online_balance = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT SUM(online_payments - online_taken_out) FROM {$table} WHERE record_date <= %s",
+            $reference_date
+        )
+    );
+
+    return null !== $online_balance ? (float) $online_balance : 0.00;
 }
 
 /* ─────────────────────────────────────────────
@@ -372,6 +425,9 @@ function tasa_daybook_process_add() {
 
     // Get record type (admin only feature)
     $record_type = sanitize_text_field( wp_unslash( $_POST['record_type'] ?? 'full' ) );
+    if ( in_array( $record_type, array( 'cash_out_only', 'online_out_only' ), true ) ) {
+        $record_type = 'amount_out_only';
+    }
     $is_admin = current_user_can( 'manage_options' );
 
     // Check if the current user already submitted a record for today
@@ -390,16 +446,24 @@ function tasa_daybook_process_add() {
         }
     }
 
-    // For "Cash Out Only" records, set sales to 0
-    if ( $record_type === 'cash_out_only' && $is_admin ) {
+    $online_taken_out = 0.00;
+    $withdrawal_type = 'cash';
+
+    // Admin-only record types can force specific input values.
+    if ( $record_type === 'amount_out_only' && $is_admin ) {
         $cash_sales     = 0.00;
         $online_sales   = 0.00;
+        $cash_taken_out = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
     } else {
         $cash_sales     = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
         $online_sales   = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
+        $cash_taken_out = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
     }
 
-    $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
+    if ( $is_admin ) {
+        $raw_withdrawal_type = sanitize_text_field( wp_unslash( $_POST['withdrawal_type'] ?? 'cash' ) );
+        $withdrawal_type = in_array( $raw_withdrawal_type, array( 'cash', 'online' ), true ) ? $raw_withdrawal_type : 'cash';
+    }
     $note            = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
 
     // Get most recent record's closing cash for opening cash
@@ -409,13 +473,16 @@ function tasa_daybook_process_add() {
     ) );
     $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
 
-    // Calculate closing cash: Today's Sale + Opening Cash - Cash Taken Out
-    // Where Today's Sale = Cash Sales + Online Sales
-    $todays_sale     = $cash_sales + $online_sales;
-    $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
+    if ( 'online' === $withdrawal_type ) {
+        $online_taken_out = $cash_taken_out;
+    }
+    $effective_cash_taken_out = 'cash' === $withdrawal_type ? $cash_taken_out : 0.00;
+
+    // Closing cash tracks physical cash only.
+    $closing_cash    = $cash_sales + $opening_cash - $effective_cash_taken_out;
 
     // Expected = opening + cash_sales - cash_taken_out
-    $expected        = $opening_cash + $cash_sales - $cash_taken_out;
+    $expected        = $opening_cash + $cash_sales - $effective_cash_taken_out;
     $calculated_diff = $closing_cash - $expected;
 
     $result = $wpdb->insert(
@@ -425,13 +492,15 @@ function tasa_daybook_process_add() {
             'opening_cash'    => $opening_cash,
             'cash_sales'      => $cash_sales,
             'online_payments' => $online_sales,  // Note: DB column is still 'online_payments'
+            'online_taken_out'=> $online_taken_out,
             'cash_taken_out'  => $cash_taken_out,
+            'withdrawal_type' => $withdrawal_type,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
             'note'            => $note,
             'created_by'      => get_current_user_id(),
         ),
-        array( '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%s', '%d' )
+        array( '%s', '%f', '%f', '%f', '%f', '%f', '%s', '%f', '%f', '%s', '%d' )
     );
 
     if ( false !== $result ) {
@@ -460,6 +529,8 @@ function tasa_daybook_process_edit() {
     $cash_sales      = floatval( sanitize_text_field( wp_unslash( $_POST['cash_sales'] ?? '0' ) ) );
     $online_sales    = floatval( sanitize_text_field( wp_unslash( $_POST['online_sales'] ?? '0' ) ) );
     $cash_taken_out  = floatval( sanitize_text_field( wp_unslash( $_POST['cash_taken_out'] ?? '0' ) ) );
+    $raw_withdrawal_type = sanitize_text_field( wp_unslash( $_POST['withdrawal_type'] ?? 'cash' ) );
+    $withdrawal_type = in_array( $raw_withdrawal_type, array( 'cash', 'online' ), true ) ? $raw_withdrawal_type : 'cash';
     $note            = sanitize_textarea_field( wp_unslash( $_POST['note'] ?? '' ) );
 
     // Get the record being edited to find its date
@@ -474,12 +545,13 @@ function tasa_daybook_process_edit() {
     ) );
     $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
 
-    // Calculate closing cash: Today's Sale + Opening Cash - Cash Taken Out
-    // Where Today's Sale = Cash Sales + Online Sales
-    $todays_sale     = $cash_sales + $online_sales;
-    $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
+    $online_taken_out = 'online' === $withdrawal_type ? $cash_taken_out : 0.00;
+    $effective_cash_taken_out = 'cash' === $withdrawal_type ? $cash_taken_out : 0.00;
 
-    $expected        = $opening_cash + $cash_sales - $cash_taken_out;
+    // Closing cash tracks physical cash only.
+    $closing_cash    = $cash_sales + $opening_cash - $effective_cash_taken_out;
+
+    $expected        = $opening_cash + $cash_sales - $effective_cash_taken_out;
     $calculated_diff = $closing_cash - $expected;
 
     $wpdb->update(
@@ -489,12 +561,14 @@ function tasa_daybook_process_edit() {
             'cash_sales'      => $cash_sales,
             'online_payments' => $online_sales,  // Note: DB column is still 'online_payments'
             'cash_taken_out'  => $cash_taken_out,
+            'online_taken_out'=> $online_taken_out,
+            'withdrawal_type' => $withdrawal_type,
             'closing_cash'    => $closing_cash,
             'calculated_diff' => $calculated_diff,
             'note'            => $note,
         ),
         array( 'id' => $id ),
-        array( '%f', '%f', '%f', '%f', '%f', '%f', '%s' ),
+        array( '%f', '%f', '%f', '%f', '%f', '%s', '%f', '%f', '%s' ),
         array( '%d' )
     );
 
@@ -553,6 +627,9 @@ function tasa_daybook_render_add_form() {
         "SELECT closing_cash FROM {$table} WHERE record_date <= %s ORDER BY id DESC LIMIT 1", $today
     ) );
     $opening_cash = $previous_record ? number_format( (float) $previous_record->closing_cash, 2 ) : '0.00';
+    $latest_online_balance = tasa_daybook_get_online_balance_upto_date( $today );
+    $total_opening_amount = number_format( (float) str_replace( ',', '', $opening_cash ) + $latest_online_balance, 2 );
+    $final_closing_amount = $total_opening_amount;
 
     settings_errors( 'tasa_cc' );
 
@@ -573,6 +650,10 @@ function tasa_daybook_render_add_form() {
 
     $is_admin = current_user_can( 'manage_options' );
 
+    $opening_row_class = $is_admin
+        ? 'tdb-grid tdb-grid--opening tdb-grid--opening-admin'
+        : 'tdb-grid tdb-grid--opening';
+
     ?>
     <form method="post" class="tdb-form" id="tdb-add-form">
         <?php wp_nonce_field( 'tasa_cc_add_nonce', '_tasa_cc_nonce' ); ?>
@@ -583,15 +664,17 @@ function tasa_daybook_render_add_form() {
             <label for="record_type"><span class="dashicons dashicons-admin-settings"></span> <?php esc_html_e( 'Record Type', 'tasa-daybook' ); ?> <span style="color: #d63638; font-size: 11px; font-weight: normal;">(<?php esc_html_e( 'Admin Only', 'tasa-daybook' ); ?>)</span></label>
             <select id="record_type" name="record_type" class="tdb-input" style="width: 100%; max-width: 300px;">
                 <option value="full"><?php esc_html_e( 'Full Record', 'tasa-daybook' ); ?></option>
-                <option value="cash_out_only"><?php esc_html_e( 'Cash Out Only', 'tasa-daybook' ); ?></option>
+                <option value="amount_out_only"><?php esc_html_e( 'Amount Out Only', 'tasa-daybook' ); ?></option>
             </select>
             <p style="margin: 8px 0 0 0; font-size: 13px; color: #646970;">
-                <?php esc_html_e( 'Select "Cash Out Only" to record only cash withdrawals without sales data.', 'tasa-daybook' ); ?>
+                <?php esc_html_e( 'Select "Amount Out Only" to create non-sales admin adjustment entries.', 'tasa-daybook' ); ?>
             </p>
         </div>
         <?php endif; ?>
 
-        <div class="tdb-grid">
+        <input type="hidden" id="online_balance_carry" value="<?php echo esc_attr( number_format( $latest_online_balance, 2, '.', '' ) ); ?>">
+
+        <div class="<?php echo esc_attr( $opening_row_class ); ?>">
             <div class="tdb-field">
                 <label for="opening_cash"><span class="dashicons dashicons-vault"></span> <?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
@@ -599,6 +682,18 @@ function tasa_daybook_render_add_form() {
                     <input type="text" id="opening_cash" name="opening_cash" value="<?php echo esc_attr( $opening_cash ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
             </div>
+            <?php if ( $is_admin ) : ?>
+            <div class="tdb-field">
+                <label for="total_opening_amount"><span class="dashicons dashicons-calculator"></span> <?php esc_html_e( 'Total Opening Amount (Online + Cash)', 'tasa-daybook' ); ?></label>
+                <div class="tdb-input-wrap">
+                    <span class="tdb-input-prefix">₹</span>
+                    <input type="text" id="total_opening_amount" name="total_opening_amount" value="<?php echo esc_attr( $total_opening_amount ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="tdb-grid">
             <div class="tdb-field" data-field-type="full-only">
                 <label for="cash_sales"><span class="dashicons dashicons-money-alt"></span> <?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
@@ -620,13 +715,22 @@ function tasa_daybook_render_add_form() {
                     <input type="text" id="todays_sale" name="todays_sale" value="0.00" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
             </div>
-            <div class="tdb-field">
-                <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></label>
+            <div class="tdb-field" data-field-type="cash-out-enabled">
+                <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Amound Taken Out', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
                     <span class="tdb-input-prefix">₹</span>
                     <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out" placeholder="0.00" required class="tdb-input" data-calc>
                 </div>
             </div>
+            <?php if ( $is_admin ) : ?>
+            <div class="tdb-field">
+                <label for="withdrawal_type"><span class="dashicons dashicons-randomize"></span> <?php esc_html_e( 'Withdrawal Type', 'tasa-daybook' ); ?></label>
+                <select id="withdrawal_type" name="withdrawal_type" class="tdb-input">
+                    <option value="cash"><?php esc_html_e( 'Cash', 'tasa-daybook' ); ?></option>
+                    <option value="online"><?php esc_html_e( 'Online Transfer', 'tasa-daybook' ); ?></option>
+                </select>
+            </div>
+            <?php endif; ?>
             <div class="tdb-field tdb-field--full">
                 <label for="note"><span class="dashicons dashicons-edit"></span> <?php esc_html_e( 'Note', 'tasa-daybook' ); ?></label>
                 <textarea id="note" name="note" rows="3" class="tdb-input tdb-input--textarea" placeholder="<?php esc_attr_e( 'Add a note for this record (optional)', 'tasa-daybook' ); ?>"></textarea>
@@ -637,9 +741,11 @@ function tasa_daybook_render_add_form() {
             <div class="tdb-preview__label"><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></div>
             <div class="tdb-preview__value" id="tdb-closing-cash">₹<?php echo esc_html( $opening_cash ); ?></div>
             <div class="tdb-preview__formula" id="tdb-formula">
-                <span data-formula-type="full"><?php esc_html_e( 'Today\'s Sale + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></span>
-                <span data-formula-type="cash_out_only" style="display: none;"><?php esc_html_e( 'Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></span>
+                <span data-formula-type="full"><?php esc_html_e( 'Cash Sales + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></span>
+                <span data-formula-type="amount_out_only" style="display: none;"><?php esc_html_e( 'Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></span>
             </div>
+            <div class="tdb-preview__label" style="margin-top: 12px;"><?php esc_html_e( 'Final Closing Amount', 'tasa-daybook' ); ?></div>
+            <div class="tdb-preview__value" id="tdb-final-closing-amount" style="background-color: #d4edda; color: #155724; border-radius: 10px; padding: 10px 14px; display: inline-block;">₹<?php echo esc_html( $final_closing_amount ); ?></div>
         </div>
 
         <button type="submit" class="tdb-btn tdb-btn--primary">
@@ -659,10 +765,14 @@ function tasa_daybook_render_add_form() {
         var cashSalesField = document.getElementById('cash_sales');
         var onlineSalesField = document.getElementById('online_sales');
         var cashTakenOutField = document.getElementById('cash_taken_out');
+        var withdrawalTypeField = document.getElementById('withdrawal_type');
         var todaysSaleField = document.getElementById('todays_sale');
         var closingCashPreview = document.getElementById('tdb-closing-cash');
+        var finalClosingAmountPreview = document.getElementById('tdb-final-closing-amount');
+        var onlineBalanceCarryField = document.getElementById('online_balance_carry');
+        var cashOutEnabledField = cashTakenOutField ? cashTakenOutField.closest('[data-field-type=\"cash-out-enabled\"]') : null;
 
-        if (!closingCashPreview || !todaysSaleField) return;
+        if (!closingCashPreview || !todaysSaleField || !finalClosingAmountPreview) return;
 
         // Toggle fields based on record type
         function toggleFields() {
@@ -671,9 +781,9 @@ function tasa_daybook_render_add_form() {
             var recordType = recordTypeSelector.value;
             var fullOnlyFields = document.querySelectorAll('[data-field-type="full-only"]');
             var fullFormula = document.querySelector('[data-formula-type="full"]');
-            var cashOutFormula = document.querySelector('[data-formula-type="cash_out_only"]');
+            var amountOutFormula = document.querySelector('[data-formula-type="amount_out_only"]');
 
-            if (recordType === 'cash_out_only') {
+            if (recordType === 'amount_out_only') {
                 // Hide full record fields
                 for (var i = 0; i < fullOnlyFields.length; i++) {
                     fullOnlyFields[i].style.display = 'none';
@@ -686,7 +796,9 @@ function tasa_daybook_render_add_form() {
 
                 // Show cash out only formula
                 if (fullFormula) fullFormula.style.display = 'none';
-                if (cashOutFormula) cashOutFormula.style.display = 'inline';
+                if (amountOutFormula) amountOutFormula.style.display = 'inline';
+                if (cashOutEnabledField) cashOutEnabledField.style.display = '';
+                if (cashTakenOutField) cashTakenOutField.setAttribute('required', 'required');
             } else {
                 // Show full record fields
                 for (var i = 0; i < fullOnlyFields.length; i++) {
@@ -699,7 +811,9 @@ function tasa_daybook_render_add_form() {
 
                 // Show full record formula
                 if (fullFormula) fullFormula.style.display = 'inline';
-                if (cashOutFormula) cashOutFormula.style.display = 'none';
+                if (amountOutFormula) amountOutFormula.style.display = 'none';
+                if (cashOutEnabledField) cashOutEnabledField.style.display = '';
+                if (cashTakenOutField) cashTakenOutField.setAttribute('required', 'required');
             }
 
             updateCalculations();
@@ -709,29 +823,34 @@ function tasa_daybook_render_add_form() {
             // Get values and handle empty/invalid inputs
             var openingValue = openingCashField ? openingCashField.value.replace(/,/g, '') : '0';
             var opening = parseFloat(openingValue) || 0;
+            var cashSales = parseFloat(cashSalesField ? cashSalesField.value : '0') || 0;
+            var onlineSales = parseFloat(onlineSalesField ? onlineSalesField.value : '0') || 0;
             var takenOut = parseFloat(cashTakenOutField ? cashTakenOutField.value : '0') || 0;
+            var onlineBalanceCarry = parseFloat(onlineBalanceCarryField ? onlineBalanceCarryField.value : '0') || 0;
+            var withdrawalType = withdrawalTypeField ? withdrawalTypeField.value : 'cash';
 
             var recordType = recordTypeSelector ? recordTypeSelector.value : 'full';
-            var closingCash;
-
-            if (recordType === 'cash_out_only') {
-                // Cash Out Only: Closing Cash = Opening Cash - Cash Taken Out
-                closingCash = opening - takenOut;
-            } else {
-                // Full Record: Closing Cash = Today's Sale + Opening Cash - Cash Taken Out
-                var cashSales = parseFloat(cashSalesField ? cashSalesField.value : '0') || 0;
-                var onlineSales = parseFloat(onlineSalesField ? onlineSalesField.value : '0') || 0;
-                var todaysSale = cashSales + onlineSales;
-
-                // Update Today's Sale field
-                todaysSaleField.value = todaysSale.toFixed(2);
-
-                closingCash = todaysSale + opening - takenOut;
+            if (recordType === 'amount_out_only') {
+                cashSales = 0;
+                onlineSales = 0;
             }
+
+            var todaysSale = cashSales + onlineSales;
+            todaysSaleField.value = todaysSale.toFixed(2);
+
+            var effectiveCashTakenOut = withdrawalType === 'cash' ? takenOut : 0;
+            var effectiveOnlineTakenOut = withdrawalType === 'online' ? takenOut : 0;
+
+            // Closing cash tracks physical cash only.
+            var closingCash = cashSales + opening - effectiveCashTakenOut;
 
             // Update Closing Cash preview
             closingCashPreview.textContent = '₹' + closingCash.toFixed(2);
             closingCashPreview.style.color = '#1a1a1a';
+
+            // Final closing amount includes online side as well.
+            var finalClosingAmount = closingCash + onlineBalanceCarry + onlineSales - effectiveOnlineTakenOut;
+            finalClosingAmountPreview.textContent = '₹' + finalClosingAmount.toFixed(2);
         }
 
         // Attach event listener to record type selector
@@ -751,6 +870,9 @@ function tasa_daybook_render_add_form() {
         if (cashTakenOutField) {
             cashTakenOutField.addEventListener('input', updateCalculations);
             cashTakenOutField.addEventListener('change', updateCalculations);
+        }
+        if (withdrawalTypeField) {
+            withdrawalTypeField.addEventListener('change', updateCalculations);
         }
 
         // Initial setup
@@ -786,6 +908,11 @@ function tasa_daybook_render_edit_form() {
         "SELECT closing_cash FROM {$table} WHERE id < %d ORDER BY id DESC LIMIT 1", $id
     ) );
     $opening_cash = $previous_record ? number_format( (float) $previous_record->closing_cash, 2 ) : '0.00';
+    $previous_day_online_total = tasa_daybook_get_previous_day_online_total( (string) $record->record_date );
+    $total_opening_amount = number_format( (float) str_replace( ',', '', $opening_cash ) + $previous_day_online_total, 2 );
+    $record_withdrawal_type = isset( $record->withdrawal_type ) && in_array( $record->withdrawal_type, array( 'cash', 'online' ), true )
+        ? $record->withdrawal_type
+        : 'cash';
 
     // Calculate Today's Sale for display
     $todays_sale = number_format( (float) $record->cash_sales + (float) $record->online_payments, 2 );
@@ -809,6 +936,14 @@ function tasa_daybook_render_edit_form() {
                         <span class="tdb-input-prefix">₹</span>
                         <input type="text" id="opening_cash" name="opening_cash"
                                value="<?php echo esc_attr( $opening_cash ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
+                    </div>
+                </div>
+                <div class="tdb-field">
+                    <label for="total_opening_amount"><span class="dashicons dashicons-calculator"></span> <?php esc_html_e( 'Total Opening Amount (Online + Cash)', 'tasa-daybook' ); ?></label>
+                    <div class="tdb-input-wrap">
+                        <span class="tdb-input-prefix">₹</span>
+                        <input type="text" id="total_opening_amount" name="total_opening_amount"
+                               value="<?php echo esc_attr( $total_opening_amount ); ?>" readonly class="tdb-input" style="background-color: #f0f0f1; cursor: not-allowed;">
                     </div>
                 </div>
                 <div class="tdb-field">
@@ -836,12 +971,19 @@ function tasa_daybook_render_edit_form() {
                     </div>
                 </div>
                 <div class="tdb-field">
-                    <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></label>
+                    <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Amound Taken Out', 'tasa-daybook' ); ?></label>
                     <div class="tdb-input-wrap">
                         <span class="tdb-input-prefix">₹</span>
                         <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out"
                                value="<?php echo esc_attr( $record->cash_taken_out ); ?>" required class="tdb-input" data-calc>
                     </div>
+                </div>
+                <div class="tdb-field">
+                    <label for="withdrawal_type"><span class="dashicons dashicons-randomize"></span> <?php esc_html_e( 'Withdrawal Type', 'tasa-daybook' ); ?></label>
+                    <select id="withdrawal_type" name="withdrawal_type" class="tdb-input">
+                        <option value="cash" <?php selected( $record_withdrawal_type, 'cash' ); ?>><?php esc_html_e( 'Cash', 'tasa-daybook' ); ?></option>
+                        <option value="online" <?php selected( $record_withdrawal_type, 'online' ); ?>><?php esc_html_e( 'Online Transfer', 'tasa-daybook' ); ?></option>
+                    </select>
                 </div>
                 <div class="tdb-field tdb-field--full">
                     <label for="note"><span class="dashicons dashicons-edit"></span> <?php esc_html_e( 'Note', 'tasa-daybook' ); ?></label>
@@ -852,7 +994,7 @@ function tasa_daybook_render_edit_form() {
             <div class="tdb-preview">
                 <div class="tdb-preview__label"><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></div>
                 <div class="tdb-preview__value" id="tdb-closing-cash">₹<?php echo esc_html( number_format( (float) $record->closing_cash, 2 ) ); ?></div>
-                <div class="tdb-preview__formula"><?php esc_html_e( 'Today\'s Sale + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></div>
+                <div class="tdb-preview__formula"><?php esc_html_e( 'Cash Sales + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?></div>
             </div>
 
             <div class="tdb-btn-group">
@@ -876,6 +1018,7 @@ function tasa_daybook_render_edit_form() {
             var cashSalesField = document.getElementById('cash_sales');
             var onlineSalesField = document.getElementById('online_sales');
             var cashTakenOutField = document.getElementById('cash_taken_out');
+            var withdrawalTypeField = document.getElementById('withdrawal_type');
             var todaysSaleField = document.getElementById('todays_sale');
             var closingCashPreview = document.getElementById('tdb-closing-cash');
 
@@ -888,12 +1031,15 @@ function tasa_daybook_render_edit_form() {
                 var cashSales = parseFloat(cashSalesField ? cashSalesField.value : '0') || 0;
                 var onlineSales = parseFloat(onlineSalesField ? onlineSalesField.value : '0') || 0;
                 var takenOut = parseFloat(cashTakenOutField ? cashTakenOutField.value : '0') || 0;
+                var withdrawalType = withdrawalTypeField ? withdrawalTypeField.value : 'cash';
 
                 // Calculate Today's Sale = Cash Sales + Online Sales
                 var todaysSale = cashSales + onlineSales;
 
-                // Calculate Closing Cash = Today's Sale + Opening Cash - Cash Taken Out
-                var closingCash = todaysSale + opening - takenOut;
+                var effectiveCashTakenOut = withdrawalType === 'cash' ? takenOut : 0;
+
+                // Closing cash tracks physical cash only.
+                var closingCash = cashSales + opening - effectiveCashTakenOut;
 
                 // Update Today's Sale field
                 todaysSaleField.value = todaysSale.toFixed(2);
@@ -915,6 +1061,9 @@ function tasa_daybook_render_edit_form() {
             if (cashTakenOutField) {
                 cashTakenOutField.addEventListener('input', updateCalculations);
                 cashTakenOutField.addEventListener('change', updateCalculations);
+            }
+            if (withdrawalTypeField) {
+                withdrawalTypeField.addEventListener('change', updateCalculations);
             }
 
             // Initial calculation
@@ -946,6 +1095,15 @@ function tasa_daybook_render_records_table() {
         echo '<p>' . esc_html__( 'No records found yet.', 'tasa-daybook' ) . '</p>';
         echo '</div>';
         return;
+    }
+
+    // Build a running online balance by record id for final combined closing.
+    $online_balance_by_id = array();
+    $online_running_total = 0.00;
+    $online_rows = $wpdb->get_results( "SELECT id, online_payments, online_taken_out FROM {$table} ORDER BY id ASC" );
+    foreach ( $online_rows as $online_row ) {
+        $online_running_total += (float) $online_row->online_payments - (float) $online_row->online_taken_out;
+        $online_balance_by_id[ (int) $online_row->id ] = $online_running_total;
     }
 
     $filter_mode        = sanitize_text_field( wp_unslash( $_GET['export_mode'] ?? 'today' ) );
@@ -999,9 +1157,10 @@ function tasa_daybook_render_records_table() {
                 <th><?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></th>
-                <th><?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></th>
+                <th><?php esc_html_e( 'Withdrawn Amount', 'tasa-daybook' ); ?></th>
                 <th class="tasa-cc-note-col"><?php esc_html_e( 'Note', 'tasa-daybook' ); ?></th>
                 <th><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></th>
+                <th><?php esc_html_e( 'Final Closing Amount', 'tasa-daybook' ); ?></th>
                 <?php if ( $is_admin ) : ?>
                     <th><?php esc_html_e( 'Actions', 'tasa-daybook' ); ?></th>
                 <?php endif; ?>
@@ -1011,15 +1170,25 @@ function tasa_daybook_render_records_table() {
         <?php foreach ( $records as $row ) :
             $user_info = tasa_daybook_get_record_user_info( (int) $row->created_by );
 
-            // Detect "Cash Out Only" records (where both cash_sales and online_payments are 0)
-            $is_cash_out_only = ( floatval( $row->cash_sales ) === 0.0 && floatval( $row->online_payments ) === 0.0 && floatval( $row->cash_taken_out ) > 0.0 );
+            // Detect "Amount Out Only" records (where both cash_sales and online_payments are 0, but there's a withdrawal)
+            $cash_taken_out = floatval( $row->cash_taken_out );
+            $is_amount_out_only = ( floatval( $row->cash_sales ) === 0.0 && floatval( $row->online_payments ) === 0.0 && $cash_taken_out > 0.0 );
+
+            $withdrawal_type = isset( $row->withdrawal_type ) && in_array( $row->withdrawal_type, array( 'cash', 'online' ), true )
+                ? $row->withdrawal_type
+                : 'cash';
+            $withdrawal_label = $withdrawal_type === 'online' ? __( 'Online', 'tasa-daybook' ) : __( 'Cash', 'tasa-daybook' );
+            $withdrawal_amount = $cash_taken_out;
+
+            $online_balance = isset( $online_balance_by_id[ (int) $row->id ] ) ? (float) $online_balance_by_id[ (int) $row->id ] : floatval( $row->online_payments );
+            $final_closing_amount = floatval( $row->closing_cash ) + $online_balance;
         ?>
             <tr>
                 <td>
                     <?php echo esc_html( $row->record_date ); ?>
-                    <?php if ( $is_cash_out_only ) : ?>
+                    <?php if ( $is_amount_out_only ) : ?>
                         <span style="display: inline-block; margin-left: 8px; padding: 2px 8px; background-color: #f0f6fc; color: #0969da; border: 1px solid #0969da; border-radius: 12px; font-size: 11px; font-weight: 600; vertical-align: middle;">
-                            <?php esc_html_e( 'CASH OUT', 'tasa-daybook' ); ?>
+                            <?php esc_html_e( 'AMOUNT OUT', 'tasa-daybook' ); ?>
                         </span>
                     <?php endif; ?>
                 </td>
@@ -1027,7 +1196,13 @@ function tasa_daybook_render_records_table() {
                 <td><?php echo esc_html( number_format( (float) $row->opening_cash, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->cash_sales, 2 ) ); ?></td>
                 <td><?php echo esc_html( number_format( (float) $row->online_payments, 2 ) ); ?></td>
-                <td><?php echo esc_html( number_format( (float) $row->cash_taken_out, 2 ) ); ?></td>
+                <td>
+                    <?php if ( $is_admin ) : ?>
+                        <?php echo esc_html( '₹' . number_format( $withdrawal_amount, 2 ) . ' (' . $withdrawal_label . ')' ); ?>
+                    <?php else : ?>
+                        <?php echo esc_html( '₹' . number_format( $withdrawal_amount, 2 ) ); ?>
+                    <?php endif; ?>
+                </td>
                 <td class="tasa-cc-note">
                     <?php if ( '' !== trim( (string) ( $row->note ?? '' ) ) ) : ?>
                         <button type="button" class="button button-small tasa-cc-view-note" data-note="<?php echo esc_attr( $row->note ); ?>">
@@ -1038,6 +1213,7 @@ function tasa_daybook_render_records_table() {
                     <?php endif; ?>
                 </td>
                 <td><?php echo esc_html( number_format( (float) $row->closing_cash, 2 ) ); ?></td>
+                <td><?php echo esc_html( '₹' . number_format( $final_closing_amount, 2 ) ); ?></td>
                 <?php if ( $is_admin ) : ?>
                 <td class="tasa-cc-actions">
                     <a href="<?php echo esc_url( admin_url( 'tools.php?page=tasa-daybook&cc_action=edit&record_id=' . $row->id ) ); ?>"

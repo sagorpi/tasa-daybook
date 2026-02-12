@@ -148,6 +148,14 @@
     margin-bottom: 24px;
 }
 
+.tdb-grid--opening {
+    margin-bottom: 14px;
+}
+
+.tdb-grid--opening-admin {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .tdb-field--full {
     grid-column: 1 / -1;
 }
@@ -502,6 +510,10 @@ body.tasa-cc-modal-open {
     }
 
     .tdb-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .tdb-grid--opening-admin {
         grid-template-columns: 1fr;
     }
 

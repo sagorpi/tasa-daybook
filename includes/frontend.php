@@ -145,10 +145,8 @@ function tasa_daybook_process_frontend_submission() {
     ) );
     $opening_cash = $previous_record ? floatval( $previous_record->closing_cash ) : 0.00;
 
-    // Calculate closing cash: Today's Sale + Opening Cash - Cash Taken Out
-    // Where Today's Sale = Cash Sales + Online Sales
-    $todays_sale     = $cash_sales + $online_sales;
-    $closing_cash    = $todays_sale + $opening_cash - $cash_taken_out;
+    // Closing cash tracks physical cash only.
+    $closing_cash    = $cash_sales + $opening_cash - $cash_taken_out;
 
     // Calculate difference (for backward compatibility, though not displayed)
     $expected        = $opening_cash + $cash_sales - $cash_taken_out;
@@ -488,7 +486,7 @@ function tasa_daybook_render_frontend_add_form() {
                 <div class="tdb-preview__label"><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></div>
                 <div class="tdb-preview__value" id="tdb-closing-cash">₹<?php echo esc_html( $opening_cash ); ?></div>
                 <div class="tdb-preview__formula">
-                    <?php esc_html_e( 'Today\'s Sale + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?>
+                    <?php esc_html_e( 'Cash Sales + Opening Cash − Cash Taken Out', 'tasa-daybook' ); ?>
                 </div>
             </div>
 
@@ -533,8 +531,8 @@ function tasa_daybook_render_frontend_add_form() {
                 // Calculate Today's Sale = Cash Sales + Online Sales
                 var todaysSale = cashSales + onlineSales;
 
-                // Calculate Closing Cash = Today's Sale + Opening Cash - Cash Taken Out
-                var closingCash = todaysSale + opening - takenOut;
+                // Closing cash tracks physical cash only.
+                var closingCash = cashSales + opening - takenOut;
 
                 // Update Today's Sale field
                 todaysSaleField.value = todaysSale.toFixed(2);

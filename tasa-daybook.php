@@ -3,7 +3,7 @@
  * Plugin Name: TASA DayBook
  * Plugin URI:  https://example.com/tasa-daybook
  * Description: Track daily cash, online payments, and cash taken out before store closing.
- * Version:     1.2.0
+ * Version:     1.4.1
  * Author:      TASA
  * Author URI:  https://example.com
  * License:     GPL-2.0+
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'TASA_DAYBOOK_VERSION', '1.2.0' );
+define( 'TASA_DAYBOOK_VERSION', '1.4.1' );
 define( 'TASA_DAYBOOK_TABLE', 'tasa_daybook_records' );
 define( 'TASA_DAYBOOK_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'TASA_DAYBOOK_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -41,7 +41,9 @@ function tasa_daybook_activate() {
         opening_cash     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         cash_sales       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         online_payments  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        online_taken_out DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         cash_taken_out   DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        withdrawal_type  VARCHAR(20)   NOT NULL DEFAULT 'cash',
         closing_cash     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         calculated_diff  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         note             TEXT          NULL,
@@ -96,6 +98,35 @@ function tasa_daybook_upgrade_database() {
     if ( ! $note_column ) {
         $wpdb->query( "ALTER TABLE {$table} ADD COLUMN note TEXT NULL AFTER calculated_diff" );
     }
+
+    // Add online_taken_out column for online withdrawal tracking if missing.
+    $online_taken_out_column = $wpdb->get_var( $wpdb->prepare(
+        "SHOW COLUMNS FROM {$table} LIKE %s",
+        'online_taken_out'
+    ) );
+
+    if ( ! $online_taken_out_column ) {
+        $wpdb->query( "ALTER TABLE {$table} ADD COLUMN online_taken_out DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER online_payments" );
+    }
+
+    // Add withdrawal_type column for payment-method tracking if missing.
+    $withdrawal_type_column = $wpdb->get_var( $wpdb->prepare(
+        "SHOW COLUMNS FROM {$table} LIKE %s",
+        'withdrawal_type'
+    ) );
+
+    if ( ! $withdrawal_type_column ) {
+        $wpdb->query( "ALTER TABLE {$table} ADD COLUMN withdrawal_type VARCHAR(20) NOT NULL DEFAULT 'cash' AFTER cash_taken_out" );
+    }
+
+    // Backfill online_taken_out for rows already marked as online withdrawals.
+    $wpdb->query(
+        "UPDATE {$table}
+         SET online_taken_out = cash_taken_out
+         WHERE withdrawal_type = 'online'
+           AND cash_taken_out > 0
+           AND online_taken_out = 0"
+    );
 }
 
 /* ─────────────────────────────────────────────

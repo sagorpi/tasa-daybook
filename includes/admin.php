@@ -241,6 +241,19 @@ function tasa_daybook_maybe_export_csv() {
 
     $output = fopen( 'php://output', 'w' );
 
+    // Build running online balance by record id so CSV matches records-table final closing logic.
+    $online_balance_by_id = array();
+    $online_running_total = 0.00;
+    $has_online_taken_out_column = (bool) $wpdb->get_var( $wpdb->prepare( "SHOW COLUMNS FROM {$table} LIKE %s", 'online_taken_out' ) );
+    $online_rows_sql = $has_online_taken_out_column
+        ? "SELECT id, online_payments, online_taken_out FROM {$table} ORDER BY id ASC"
+        : "SELECT id, online_payments, 0.00 AS online_taken_out FROM {$table} ORDER BY id ASC";
+    $online_rows = $wpdb->get_results( $online_rows_sql );
+    foreach ( $online_rows as $online_row ) {
+        $online_running_total += (float) $online_row->online_payments - (float) $online_row->online_taken_out;
+        $online_balance_by_id[ (int) $online_row->id ] = $online_running_total;
+    }
+
     fputcsv(
         $output,
         array(
@@ -249,9 +262,10 @@ function tasa_daybook_maybe_export_csv() {
             'Opening Cash',
             'Cash Sales',
             'Online Sales',
-            'Cash Taken Out',
+            'Withdrawn Amount',
             'Note',
             'Closing Cash',
+            'Final Closing Amount',
         )
     );
 
@@ -269,6 +283,16 @@ function tasa_daybook_maybe_export_csv() {
             $date_with_time .= ' (' . $record_time . ')';
         }
 
+        $cash_taken_out = (float) $row->cash_taken_out;
+        $withdrawal_type = isset( $row->withdrawal_type ) && in_array( $row->withdrawal_type, array( 'cash', 'online' ), true )
+            ? $row->withdrawal_type
+            : 'cash';
+        $withdrawal_label = $withdrawal_type === 'online' ? 'Online' : 'Cash';
+        $withdrawn_amount = '₹' . number_format( $cash_taken_out, 2, '.', '' ) . ' (' . $withdrawal_label . ')';
+
+        $online_balance = isset( $online_balance_by_id[ (int) $row->id ] ) ? (float) $online_balance_by_id[ (int) $row->id ] : (float) $row->online_payments;
+        $final_closing_amount = (float) $row->closing_cash + $online_balance;
+
         fputcsv(
             $output,
             array(
@@ -277,9 +301,10 @@ function tasa_daybook_maybe_export_csv() {
                 number_format( (float) $row->opening_cash, 2, '.', '' ),
                 number_format( (float) $row->cash_sales, 2, '.', '' ),
                 number_format( (float) $row->online_payments, 2, '.', '' ),
-                number_format( (float) $row->cash_taken_out, 2, '.', '' ),
+                $withdrawn_amount,
                 (string) ( $row->note ?? '' ),
                 number_format( (float) $row->closing_cash, 2, '.', '' ),
+                number_format( $final_closing_amount, 2, '.', '' ),
             )
         );
     }
@@ -716,7 +741,7 @@ function tasa_daybook_render_add_form() {
                 </div>
             </div>
             <div class="tdb-field" data-field-type="cash-out-enabled">
-                <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Amound Taken Out', 'tasa-daybook' ); ?></label>
+                <label for="cash_taken_out"><span class="dashicons dashicons-migrate"></span> <?php esc_html_e( 'Amount Taken Out', 'tasa-daybook' ); ?></label>
                 <div class="tdb-input-wrap">
                     <span class="tdb-input-prefix">₹</span>
                     <input type="number" step="0.01" min="0" id="cash_taken_out" name="cash_taken_out" placeholder="0.00" required class="tdb-input" data-calc>

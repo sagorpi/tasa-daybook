@@ -264,6 +264,8 @@ function tasa_daybook_frontend_form( $atts ) {
     // Check if user is Shop Manager or Administrator
     $user = wp_get_current_user();
     $allowed_roles = array( 'shop_manager', 'administrator' );
+    $is_shop_manager = in_array( 'shop_manager', $user->roles, true );
+    $is_admin = current_user_can( 'manage_options' );
 
     if ( ! array_intersect( $allowed_roles, $user->roles ) ) {
         return tasa_daybook_render_access_denied_message( $wrapper_class );
@@ -285,17 +287,94 @@ function tasa_daybook_frontend_form( $atts ) {
     <div class="<?php echo esc_attr( $wrapper_class ); ?>">
         <?php echo tasa_daybook_render_frontend_message(); ?>
 
-        <?php if ( $already_submitted ) : ?>
+        <?php if ( $already_submitted && $is_shop_manager && ! $is_admin ) : ?>
+            <?php echo tasa_daybook_render_recent_records(); ?>
+        <?php elseif ( $already_submitted ) : ?>
             <div class="tdb-alert tdb-alert--success tdb-alert--submitted">
                 <span class="dashicons dashicons-yes-alt"></span>
                 <div class="tdb-alert__content">
                     <strong><?php esc_html_e( 'Already Submitted', 'tasa-daybook' ); ?></strong>
-                    <p><?php esc_html_e( 'You have already submitted today\'s record. Thank you!', 'tasa-daybook' ); ?></p>
+                    <p><?php esc_html_e( 'You have already submitted today\'s record. Please use the admin dashboard for full history.', 'tasa-daybook' ); ?></p>
                 </div>
                 <img src="https://i.ibb.co/605d3y3Q/Tasa-Elegance-Logo.png" alt="<?php esc_attr_e( 'TASA Elegance Logo', 'tasa-daybook' ); ?>" class="tdb-alert__logo">
             </div>
         <?php else : ?>
             <?php echo tasa_daybook_render_frontend_add_form(); ?>
+        <?php endif; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/* ─────────────────────────────────────────────
+ * Render recent records table (Shop Manager)
+ * ───────────────────────────────────────────── */
+function tasa_daybook_render_recent_records() {
+    global $wpdb;
+    $table = tasa_daybook_table();
+    $current_user = wp_get_current_user();
+    $user_full_name = trim( $current_user->first_name . ' ' . $current_user->last_name );
+    $logout_url = wp_logout_url( get_permalink() );
+
+    if ( '' === $user_full_name ) {
+        $user_full_name = $current_user->display_name;
+    }
+
+    $records = $wpdb->get_results(
+        "SELECT * FROM {$table} ORDER BY record_date DESC, id DESC LIMIT 5"
+    );
+
+    ob_start();
+    ?>
+    <div class="tdb-card tdb-recent-records">
+        <div class="tdb-card__header">
+            <div class="tdb-card__header-main">
+                <span class="dashicons dashicons-list-view tdb-card__icon"></span>
+                <div>
+                    <h2 class="tdb-card__title"><?php esc_html_e( 'Recent Records (Last 5 Days)', 'tasa-daybook' ); ?></h2>
+                    <div class="tdb-card__user-row">
+                        <p class="tdb-card__user"><?php echo esc_html( $user_full_name ); ?></p>
+                        <a href="<?php echo esc_url( $logout_url ); ?>" class="tdb-btn tdb-btn--logout"><?php esc_html_e( 'Log Out', 'tasa-daybook' ); ?></a>
+                    </div>
+                </div>
+            </div>
+            <div class="tdb-card__brand">
+                <img src="https://i.ibb.co/605d3y3Q/Tasa-Elegance-Logo.png" alt="<?php esc_attr_e( 'TASA Elegance Logo', 'tasa-daybook' ); ?>" class="tdb-card__brand-logo">
+            </div>
+        </div>
+
+        <?php if ( empty( $records ) ) : ?>
+            <div class="tdb-alert tdb-alert--info">
+                <span class="dashicons dashicons-info-outline"></span>
+                <div><?php esc_html_e( 'No recent records found.', 'tasa-daybook' ); ?></div>
+            </div>
+        <?php else : ?>
+            <div class="tdb-recent-records__table-wrap">
+                <table class="tdb-recent-records__table">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e( 'Date', 'tasa-daybook' ); ?></th>
+                            <th><?php esc_html_e( 'Opening Cash', 'tasa-daybook' ); ?></th>
+                            <th><?php esc_html_e( 'Cash Sales', 'tasa-daybook' ); ?></th>
+                            <th><?php esc_html_e( 'Online Sales', 'tasa-daybook' ); ?></th>
+                            <th><?php esc_html_e( 'Cash Taken Out', 'tasa-daybook' ); ?></th>
+                            <th><?php esc_html_e( 'Closing Cash', 'tasa-daybook' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $records as $row ) : ?>
+                            <tr>
+                                <td data-label="<?php esc_attr_e( 'Date', 'tasa-daybook' ); ?>"><?php echo esc_html( $row->record_date ); ?></td>
+                                <td data-label="<?php esc_attr_e( 'Opening Cash', 'tasa-daybook' ); ?>">₹<?php echo esc_html( number_format( (float) $row->opening_cash, 2 ) ); ?></td>
+                                <td data-label="<?php esc_attr_e( 'Cash Sales', 'tasa-daybook' ); ?>">₹<?php echo esc_html( number_format( (float) $row->cash_sales, 2 ) ); ?></td>
+                                <td data-label="<?php esc_attr_e( 'Online Sales', 'tasa-daybook' ); ?>">₹<?php echo esc_html( number_format( (float) $row->online_payments, 2 ) ); ?></td>
+                                <td data-label="<?php esc_attr_e( 'Cash Taken Out', 'tasa-daybook' ); ?>">₹<?php echo esc_html( number_format( (float) $row->cash_taken_out, 2 ) ); ?></td>
+                                <td data-label="<?php esc_attr_e( 'Closing Cash', 'tasa-daybook' ); ?>">₹<?php echo esc_html( number_format( (float) $row->closing_cash, 2 ) ); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php endif; ?>
     </div>
     <?php
@@ -379,6 +458,7 @@ function tasa_daybook_render_frontend_add_form() {
     $day_name = wp_date( 'l, F j, Y' );
     $current_user = wp_get_current_user();
     $user_full_name = trim( $current_user->first_name . ' ' . $current_user->last_name );
+    $logout_url = wp_logout_url( get_permalink() );
 
     if ( '' === $user_full_name ) {
         $user_full_name = $current_user->display_name;
@@ -400,7 +480,10 @@ function tasa_daybook_render_frontend_add_form() {
                 <div>
                     <h2 class="tdb-card__title"><?php esc_html_e( 'Submit Today\'s Record', 'tasa-daybook' ); ?></h2>
                     <p class="tdb-card__subtitle"><?php echo esc_html( $day_name ); ?></p>
-                    <p class="tdb-card__user"><?php echo esc_html( $user_full_name ); ?></p>
+                    <div class="tdb-card__user-row">
+                        <p class="tdb-card__user"><?php echo esc_html( $user_full_name ); ?></p>
+                        <a href="<?php echo esc_url( $logout_url ); ?>" class="tdb-btn tdb-btn--logout"><?php esc_html_e( 'Log Out', 'tasa-daybook' ); ?></a>
+                    </div>
                 </div>
             </div>
             <div class="tdb-card__brand">

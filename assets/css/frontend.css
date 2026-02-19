@@ -98,6 +98,18 @@ body.tdb-fullscreen-page .tdb-card {
     color: #1d4ed8;
 }
 
+.tdb-card__user-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.tdb-card__user-row .tdb-card__user {
+    margin: 0;
+}
+
 .tdb-card__brand {
     margin-left: auto;
     padding-top: 2px;
@@ -352,6 +364,55 @@ body.tdb-fullscreen-page .tdb-card {
     width: 100%;
 }
 
+.tdb-btn--logout {
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #eef2ff;
+    color: #374151;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+}
+
+.tdb-btn--logout:hover {
+    background: #fee2e2;
+    color: #991b1b;
+    border-color: #fca5a5;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Recent records table */
+.tdb-recent-records__table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.tdb-recent-records__table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+}
+
+.tdb-recent-records__table th,
+.tdb-recent-records__table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.tdb-recent-records__table th {
+    background: #f8fafc;
+    font-weight: 700;
+    color: #334155;
+}
+
+.tdb-recent-records__table tbody tr:hover {
+    background: #f8fafc;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .tdb-frontend-wrap {
@@ -395,6 +456,10 @@ body.tdb-fullscreen-page .tdb-card {
         font-size: 20px;
     }
 
+    .tdb-card__user-row {
+        gap: 8px;
+    }
+
     .tdb-grid {
         grid-template-columns: 1fr;
         gap: 20px;
@@ -413,6 +478,50 @@ body.tdb-fullscreen-page .tdb-card {
         margin-left: 0;
         max-width: 120px;
         max-height: 42px;
+    }
+
+    .tdb-recent-records__table {
+        min-width: 0;
+    }
+
+    .tdb-recent-records__table thead {
+        display: none;
+    }
+
+    .tdb-recent-records__table,
+    .tdb-recent-records__table tbody,
+    .tdb-recent-records__table tr,
+    .tdb-recent-records__table td {
+        display: block;
+        width: 100%;
+    }
+
+    .tdb-recent-records__table tr {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        background: #fff;
+    }
+
+    .tdb-recent-records__table td {
+        border: 0;
+        padding: 8px 0;
+        white-space: normal;
+        text-align: right;
+        position: relative;
+        padding-left: 48%;
+    }
+
+    .tdb-recent-records__table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 0;
+        top: 8px;
+        width: 44%;
+        font-weight: 700;
+        color: #334155;
+        text-align: left;
     }
 }
 
